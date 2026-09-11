@@ -1,0 +1,13 @@
+# PyInstaller build output -- built fresh by build.py / CI, not committed.
+# The .exe is distributed via GitHub Releases instead (see README).
+build/
+dist/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+
+# OS cruft
+.DS_Store
+Thumbs.db

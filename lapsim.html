@@ -1,0 +1,2096 @@
+<meta charset="utf-8">
+<title>SDM Lap Optimizer</title>
+<meta name="description" content="Working v1: track editor, importers, a quasi-steady-state lap solver, live results, and FEA/CFD export generators - all client-side.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#eceef0; --surface:#f7f8f9; --surface-2:#e4e7ea;
+    --border:#ccd2d8; --line:#dde1e5;
+    --text:#16191d; --muted:#59616a; --faint:#8b939c;
+    --accent:#1763c7; --accent-soft:#dbe7f6;
+    --ok:#2f7d32; --warn:#8a5a00; --crit:#c12626;
+    --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Consolas,"Liberation Mono",monospace;
+    --r:5px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --bg:#101215; --surface:#171a1e; --surface-2:#1f2429;
+      --border:#313842; --line:#262c33;
+      --text:#e6e9ed; --muted:#99a1ab; --faint:#6f7883;
+      --accent:#55a3ff; --accent-soft:#17324d;
+      --ok:#57c75a; --warn:#ffb23e; --crit:#ff6060;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#101215; --surface:#171a1e; --surface-2:#1f2429;
+    --border:#313842; --line:#262c33;
+    --text:#e6e9ed; --muted:#99a1ab; --faint:#6f7883;
+    --accent:#55a3ff; --accent-soft:#17324d;
+    --ok:#57c75a; --warn:#ffb23e; --crit:#ff6060;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+    font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  h1,h2,h3{margin:0;text-wrap:balance;font-weight:600}
+  button{font:inherit;color:inherit}
+  .num,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  .app{display:flex;flex-direction:column;min-height:100vh}
+  .topbar{display:flex;align-items:center;gap:14px;padding:0 14px;height:48px;
+    background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+  .topbar .mark{font-weight:600;letter-spacing:.02em;font-size:13px;white-space:nowrap}
+  .topbar .mark span{color:var(--faint);font-weight:400}
+  .topbar select.track{font-family:var(--mono);font-size:12px;color:var(--text);
+    background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:4px 8px;max-width:230px}
+  .topbar .spacer{flex:1}
+  .lapreadout{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  .lapreadout b{color:var(--text);font-size:14px}
+  .lapreadout.stale b{color:var(--warn)}
+  .btn{background:var(--accent-soft);color:var(--accent);
+    border:1px solid color-mix(in srgb,var(--accent) 40%,var(--border));border-radius:var(--r);
+    padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer}
+  .btn:hover{border-color:var(--accent)}
+  .btn.solid{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btn.sm{padding:4px 9px;font-size:11px}
+  .ghost{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);
+    padding:5px 10px;font-size:12px;cursor:pointer;color:var(--text)}
+  .ghost:hover{border-color:var(--muted)}
+  .ghost[aria-pressed="true"]{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+  .body{display:flex;flex:1;min-height:0}
+  nav.rail{width:186px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);
+    display:flex;flex-direction:column;overflow-y:auto}
+  nav.rail .grp{padding:13px 12px 4px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+  nav.rail button.navitem{display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+    background:none;border:0;padding:8px 12px;cursor:pointer;color:var(--muted);border-left:2px solid transparent;font-size:13px}
+  nav.rail button.navitem:hover{color:var(--text);background:var(--surface-2)}
+  nav.rail button.navitem[aria-current="true"]{color:var(--text);background:var(--surface-2);border-left-color:var(--accent)}
+  nav.rail .foot{margin-top:auto;padding:11px 12px;border-top:1px solid var(--border);font-size:11px;color:var(--faint)}
+
+  main.stage{flex:1;overflow-y:auto;padding:20px 24px 64px}
+  .statusbar{flex-shrink:0;min-height:26px;background:var(--surface);border-top:1px solid var(--border);
+    display:flex;flex-wrap:wrap;align-items:center;gap:14px;padding:3px 14px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .statusbar b{color:var(--text);font-weight:500}
+
+  .view{max-width:1160px}
+  .view[hidden]{display:none}
+  .vhead{margin-bottom:16px}
+  .eyebrow{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:var(--accent);font-weight:500}
+  .vhead h1{font-size:20px;margin:5px 0 4px}
+  .vhead p{margin:0;color:var(--muted);max-width:70ch}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+    padding:14px 15px;display:flex;flex-direction:column;gap:10px}
+  .panel.wide{grid-column:1/-1}
+  .panel>header{display:flex;align-items:center;gap:8px}
+  .panel>header h2{font-size:13.5px;font-weight:600}
+  .panel>header .sp{flex:1}
+  .panel .desc{font-size:12px;color:var(--muted);margin-top:-2px}
+  .chip{font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;text-transform:uppercase;
+    padding:2px 6px;border-radius:3px;border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+  .chip.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--border))}
+  .chip.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--border))}
+
+  .subhead{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+    margin:26px 0 10px;font-weight:600;display:flex;align-items:center;gap:10px}
+  .subhead::after{content:"";flex:1;height:1px;background:var(--border)}
+
+  /* forms */
+  .frow{display:flex;justify-content:space-between;align-items:center;gap:10px;
+    padding:5px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+  .frow:last-child{border-bottom:0}
+  .frow label{color:var(--muted);flex:1}
+  .frow input,.frow select{font-family:var(--mono);font-size:12px;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:4px;padding:4px 7px;color:var(--text);width:120px;text-align:right}
+  .frow select{text-align:left}
+  .frow .rv{font-family:var(--mono);font-size:11.5px;color:var(--text);text-align:right}
+  .frow .u{color:var(--faint);font-size:11px;margin-left:-4px;width:34px}
+  .derived{font-size:12px;color:var(--muted);display:grid;grid-template-columns:1fr auto;gap:2px 12px}
+  .derived b{color:var(--text);font-family:var(--mono);font-weight:500}
+
+  table.data{width:100%;border-collapse:collapse;font-size:12px}
+  table.data{color:var(--text)}
+  table.data th,table.data td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap;color:inherit}
+  table.data th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);font-weight:500}
+  table.data td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right}
+  .scroll-x{overflow-x:auto;max-height:340px;overflow-y:auto}
+
+  /* track editor */
+  .editorwrap{display:grid;grid-template-columns:1fr 232px;gap:0;border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+  @media (max-width:800px){.editorwrap{grid-template-columns:1fr}}
+  .canvaswrap{position:relative;background:
+      repeating-linear-gradient(0deg,transparent 0 27px,var(--line) 27px 28px),
+      repeating-linear-gradient(90deg,transparent 0 27px,var(--line) 27px 28px),var(--surface-2);
+    min-height:360px}
+  svg.circuit{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:default}
+  #setupView.editing svg.circuit{cursor:crosshair}
+  svg.circuit .corridor{fill:var(--accent);opacity:.10}
+  svg.circuit .centreline{fill:none;stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke}
+  svg.circuit .node{fill:var(--surface);stroke:var(--accent);stroke-width:2;vector-effect:non-scaling-stroke;cursor:grab}
+  .linklike{background:none;border:0;color:var(--accent);cursor:pointer;font:inherit;padding:0}
+  .linklike:hover{text-decoration:underline}
+  .linklike.del{color:var(--muted)}
+  .linklike.on{font-weight:600}
+  .roflag{font-size:11px;color:var(--faint);display:flex;align-items:center;gap:6px;margin-bottom:6px}
+  svg.circuit .node.sf{fill:var(--accent)}
+  svg.circuit .kstrip{stroke:var(--warn);stroke-width:1.5;vector-effect:non-scaling-stroke;opacity:.55}
+  .edtools{background:var(--surface);border-left:1px solid var(--border);padding:11px;display:flex;flex-direction:column;gap:8px;overflow-y:auto}
+  .edtools .toolgrp{display:flex;flex-wrap:wrap;gap:5px}
+  .edtools .mini{font-size:11px;color:var(--faint);letter-spacing:.05em;text-transform:uppercase;margin-top:4px}
+  .edtools .stat{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+  .edtools .stat b{color:var(--text);font-family:var(--mono)}
+  .rangerow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .rangerow input[type=range]{flex:1;accent-color:var(--accent)}
+
+  .cv{width:100%;border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2);display:block}
+  .cv.rline{height:280px}
+  .cv.trace{height:180px}
+  .cv.gg{height:300px}
+  .cbar{display:flex;align-items:center;gap:8px;margin-top:7px;font-family:var(--mono);font-size:10px;color:var(--muted)}
+  .cbar .g{flex:1;height:9px;border:1px solid var(--border);border-radius:2px}
+  .cbar .lab{white-space:nowrap}
+  .legend-line{display:flex;flex-wrap:wrap;gap:16px;margin-top:7px;font-size:11px;color:var(--muted)}
+  .legend-line i{display:inline-block;width:16px;height:3px;vertical-align:2px;margin-right:6px;border-radius:2px}
+
+  .metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+  .metric{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:9px 11px}
+  .metric .k{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
+  .metric .v{font-family:var(--mono);font-size:17px;font-weight:500;margin-top:2px}
+  .metric .v small{font-size:11px;color:var(--muted);font-weight:400}
+
+  textarea.out{width:100%;min-height:150px;background:var(--surface-2);border:1px solid var(--border);
+    border-radius:4px;color:var(--text);font-family:var(--mono);font-size:11px;padding:9px;resize:vertical;white-space:pre}
+  .filerow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
+  input[type=file]{font-size:11px;max-width:200px}
+  .toast{position:fixed;left:50%;bottom:38px;transform:translateX(-50%);background:var(--text);color:var(--bg);
+    padding:7px 15px;border-radius:100px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:50}
+  .toast.show{opacity:1}
+  .pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+  .pickopt{display:flex;flex-direction:column;gap:2px;text-align:left;background:var(--surface-2);
+    border:1px solid var(--border);border-radius:var(--r);padding:9px 11px;cursor:pointer;color:inherit}
+  .pickopt b{font-size:12.5px}.pickopt span{font-size:11px;color:var(--muted)}
+  .pickopt[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+  .note{font-size:11.5px;color:var(--muted);border-left:2px solid var(--warn);padding:3px 0 3px 9px;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--warn) 9%,transparent),transparent)}
+  a.inline{color:var(--accent)}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="app">
+  <div class="topbar">
+    <div class="mark">SDM Lap Optimizer <span>v1</span></div>
+    <select class="track" id="trackSel" aria-label="Active track"></select>
+    <div class="spacer"></div>
+    <div class="lapreadout" id="lapReadout">lap <b>&mdash;</b></div>
+    <button class="btn solid" id="solveBtn" type="button">Solve &#9654;</button>
+    <button class="ghost sm" id="themeBtn" type="button">Theme</button>
+  </div>
+
+  <div class="body">
+    <nav class="rail">
+      <div class="grp">Workflow</div>
+      <button class="navitem" data-v="setup" aria-current="true">Track &amp; setup</button>
+      <button class="navitem" data-v="run">Run</button>
+      <button class="navitem" data-v="results">Results</button>
+      <button class="navitem" data-v="export">Export</button>
+      <div class="foot">Quasi-steady-state solver.<br>State saved in this browser.</div>
+    </nav>
+
+    <main class="stage" id="stage">
+
+      <!-- ============ SETUP ============ -->
+      <section class="view" data-view="setup" id="setupView">
+        <div class="vhead">
+          <div class="eyebrow">Workflow &middot; step 1</div>
+          <h1>Track &amp; setup</h1>
+          <p>Pick an FSAE Michigan event &mdash; each loads its official course, read-only, with the rules locked. Autocross and endurance are traced from the 2026 course maps. To change a layout, hit <b>Edit track</b>: it forks an editable copy into <b>My tracks</b>. Then set the vehicle.</p>
+        </div>
+
+        <div class="editorwrap">
+          <div class="canvaswrap">
+            <svg class="circuit" id="edSvg" xmlns="http://www.w3.org/2000/svg"></svg>
+          </div>
+          <div class="edtools">
+            <button class="btn sm solid" id="editTrackBtn" type="button">Edit track</button>
+            <button class="btn sm solid" id="doneEditBtn" type="button" hidden>Done editing</button>
+            <button class="ghost sm" id="fitBtn" type="button">Fit view</button>
+
+            <div id="edEdit" hidden>
+              <div class="mini">Mode</div>
+              <div class="toolgrp" id="modeTools">
+                <button class="ghost sm" data-mode="move" aria-pressed="true">Move</button>
+                <button class="ghost sm" data-mode="append">Add pt</button>
+                <button class="ghost sm" data-mode="insert">Insert</button>
+                <button class="ghost sm" data-mode="delete">Delete</button>
+              </div>
+              <div class="toolgrp"><button class="ghost sm" id="closeLoopBtn" aria-pressed="true">Closed loop</button></div>
+              <div class="mini">Corridor half-width</div>
+              <div class="rangerow">
+                <input type="range" id="widthRange" min="1" max="4" step="0.05" value="1.5">
+                <span class="num" id="widthVal">1.50 m</span>
+              </div>
+              <div class="mini">Mesh spacing</div>
+              <div class="rangerow">
+                <input type="range" id="dsRange" min="0.4" max="4" step="0.1" value="1">
+                <span class="num" id="dsVal">1.0 m</span>
+              </div>
+              <div class="toolgrp" style="margin-top:6px">
+                <button class="btn sm" id="renameBtn">Rename</button>
+                <button class="btn sm" id="delTrackBtn">Delete</button>
+              </div>
+            </div>
+
+            <div class="mini">Track</div>
+            <div class="stat"><span>Source</span><b id="stSrc">&mdash;</b></div>
+            <div class="stat"><span>Length</span><b id="stLen">&mdash;</b></div>
+            <div class="stat"><span>Min radius</span><b id="stR">&mdash;</b></div>
+            <div class="stat"><span>Stations</span><b id="stN">&mdash;</b></div>
+            <div class="stat"><span>Nodes</span><b id="stNodes">&mdash;</b></div>
+          </div>
+        </div>
+
+        <h3 class="subhead">My tracks</h3>
+        <div class="grid">
+          <div class="panel">
+            <header><h2>My tracks</h2><span class="sp"></span><span class="chip ok">editable</span></header>
+            <p class="desc">Blank tracks, edited copies, and imports -- all deletable here. FSAE presets are locked and read-only; imports stay read-only for direct editing too until you hit <b>Edit track</b> to fork a copy.</p>
+            <ul class="plain" id="myTracksList"></ul>
+            <div class="frow"><label>New name</label><input id="newName" value="my_track"></div>
+            <button class="btn" id="newBlankBtn" type="button">New blank track</button>
+          </div>
+        </div>
+
+        <h3 class="subhead">Import a track</h3>
+        <div class="grid">
+          <div class="panel">
+            <header><h2>OptimumLap CSV</h2><span class="sp"></span><span class="chip ok">works</span></header>
+            <p class="desc">Parses the channel table (speed / elapsedDistance / cornerRadius, optional x/y).</p>
+            <div class="filerow"><input type="file" id="olFile" accept=".csv,text/csv"></div>
+            <div class="frow"><label>or paste</label></div>
+            <textarea class="out" id="olPaste" placeholder="paste CSV contents" style="min-height:70px"></textarea>
+            <button class="btn" id="olImportBtn" type="button">Import</button>
+          </div>
+          <div class="panel">
+            <header><h2>Cone layout CSV</h2><span class="sp"></span><span class="chip ok">works</span></header>
+            <p class="desc">Columns <span class="mono">x,y,side</span> (side = L/R or left/right / 0/1). Builds the mid-line between the chains.</p>
+            <div class="filerow"><input type="file" id="coneFile" accept=".csv,text/csv"></div>
+            <textarea class="out" id="conePaste" placeholder="x,y,side&#10;0,0,L&#10;0,3,R&#10;..." style="min-height:70px"></textarea>
+            <button class="btn" id="coneImportBtn" type="button">Import</button>
+          </div>
+          <div class="panel">
+            <header><h2>GPS trace</h2><span class="sp"></span><span class="chip ok">works</span></header>
+            <p class="desc">GPX file, or CSV with <span class="mono">lat,lon</span> (or <span class="mono">x,y</span>) columns. Projected to local metres.</p>
+            <div class="filerow"><input type="file" id="gpsFile" accept=".gpx,.csv,.xml,text/csv"></div>
+            <button class="btn" id="gpsImportBtn" type="button">Import</button>
+          </div>
+        </div>
+
+        <h3 class="subhead">Competition event</h3>
+        <div class="grid">
+          <div class="panel wide">
+            <header><h2>FSAE Michigan event</h2><span class="sp"></span><span class="chip ok">preset</span></header>
+            <p class="desc">Picking an event loads its official course, read-only, and locks the rules. Acceleration and skid pad are exact to the rulebook; autocross and endurance are traced from the <b>Autocross 2026</b> / <b>Endurance 2026</b> course maps. Hit <b>Edit track</b> on the map to fork an editable copy.</p>
+            <div class="pick" id="eventPick">
+              <button class="pickopt" data-ev="acceleration" aria-pressed="false"><b>Acceleration</b><span>75 m &middot; standing start</span></button>
+              <button class="pickopt" data-ev="skidpad" aria-pressed="false"><b>Skid pad</b><span>R 9.125 m &middot; steady state</span></button>
+              <button class="pickopt" data-ev="autocross" aria-pressed="false"><b>Autocross</b><span>&asymp;0.71 km &middot; one timed run</span></button>
+              <button class="pickopt" data-ev="endurance" aria-pressed="true"><b>Endurance</b><span>&asymp;22 km &middot; periodic laps</span></button>
+            </div>
+            <div class="grid" style="margin-top:4px">
+              <div>
+                <div class="mini" style="font-size:11px;color:var(--faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">Rules (locked)</div>
+                <div class="frow"><label>Course</label><span class="rv" id="ru_course"></span></div>
+                <div class="frow"><label>Start / BC</label><span class="rv" id="ru_bc"></span></div>
+                <div class="frow"><label>Timing</label><span class="rv" id="ru_timing"></span></div>
+                <div class="frow"><label>Laps</label><span class="rv" id="ru_laps"></span></div>
+              </div>
+              <div>
+                <div class="mini" style="font-size:11px;color:var(--faint);letter-spacing:.05em;text-transform:uppercase;margin-bottom:2px">Conditions (what-if)</div>
+                <div class="frow"><label>Driver mass</label><input id="ev_driver" type="number" step="1" value="68"><span class="u">kg</span></div>
+                <div class="frow"><label>Ambient temp</label><input id="ev_amb" type="number" step="1" value="25"><span class="u">&deg;C</span></div>
+                <div class="frow"><label>Grip scale &mu;</label><input id="ev_mu" type="number" step="0.01" value="1.00"></div>
+                <button class="btn sm" id="forkCourseBtn" type="button" style="margin-top:6px">Edit a copy of this course</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="subhead">Vehicle</h3>
+        <div class="grid" id="vehGrid"></div>
+        <div class="grid" style="margin-top:14px">
+          <div class="panel">
+            <header><h2>Derived</h2><span class="sp"></span><span class="chip ok">live</span></header>
+            <div class="derived" id="vehDerived"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ RUN ============ -->
+      <section class="view" data-view="run" hidden>
+        <div class="vhead">
+          <div class="eyebrow">Workflow &middot; step 2</div>
+          <h1>Run</h1>
+          <p>Quasi-steady-state solve: grip-limited corner speeds, then forward (traction / power) and backward (braking) passes under a friction-ellipse limit, with aero load and longitudinal load transfer.</p>
+        </div>
+        <div class="grid">
+          <div class="panel">
+            <header><h2>Solver</h2><span class="sp"></span></header>
+            <div class="pick" id="modePick">
+              <button class="pickopt" data-mode="quick" aria-pressed="true"><b>Quick (QSS)</b><span>1.2 m mesh, 3 passes &middot; &lt;60 ms &middot; slightly optimistic</span></button>
+              <button class="pickopt" data-mode="refined" aria-pressed="false"><b>Refined</b><span>fine mesh, 6 passes, aero-coupled &middot; &lt;1 s</span></button>
+            </div>
+            <div class="frow"><label>Mesh spacing ds</label><input id="sv_ds" type="number" step="0.1" value="2.0"><span class="u">m</span></div>
+            <div class="frow"><label>Corner-speed iterations</label><input id="sv_it" type="number" step="1" value="3"></div>
+            <div class="frow"><label>Lap passes (closed)</label><input id="sv_passes" type="number" step="1" value="4"></div>
+            <button class="btn solid" id="runSolveBtn" type="button">Solve now</button>
+          </div>
+          <div class="panel">
+            <header><h2>Log</h2><span class="sp"></span></header>
+            <textarea class="out" id="runLog" readonly style="min-height:200px"></textarea>
+          </div>
+          <div class="panel">
+            <header><h2>Result</h2><span class="sp"></span><span class="chip" id="runResChip">no solve yet</span></header>
+            <div class="derived" id="runResult"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ RESULTS ============ -->
+      <section class="view" data-view="results" hidden>
+        <div class="vhead">
+          <div class="eyebrow">Workflow &middot; step 3</div>
+          <h1>Results</h1>
+          <p>The solved lap. Everything below is computed live from the current track, event, and vehicle. Colour scales carry data &mdash; each has its own key.</p>
+        </div>
+        <div class="metrics" id="resMetrics"></div>
+
+        <div class="grid" style="margin-top:14px">
+          <div class="panel">
+            <header><h2>Racing line &mdash; speed</h2></header>
+            <canvas class="cv rline" id="cvLine"></canvas>
+            <div class="cbar"><span class="lab" id="cbSpeedLo">0</span><div class="g" id="cbSpeedG"></div><span class="lab" id="cbSpeedHi">km/h</span></div>
+          </div>
+          <div class="panel">
+            <header><h2>Racing line &mdash; lateral load</h2></header>
+            <canvas class="cv rline" id="cvLoad"></canvas>
+            <div class="cbar"><span class="lab">0 g</span><div class="g" id="cbLoadG"></div><span class="lab" id="cbLoadHi">g</span></div>
+          </div>
+
+          <div class="panel wide">
+            <header><h2>Speed vs distance</h2><span class="sp"></span><span class="desc">line coloured by speed &middot; braking zones shaded</span></header>
+            <canvas class="cv trace" id="cvTrace"></canvas>
+            <div class="cbar"><span class="lab" id="cbTraceLo">0</span><div class="g" id="cbTraceG"></div><span class="lab" id="cbTraceHi">km/h</span></div>
+          </div>
+
+          <div class="panel wide">
+            <header><h2>Longitudinal &amp; lateral acceleration</h2><span class="sp"></span><span class="desc">vs distance</span></header>
+            <canvas class="cv trace" id="cvG"></canvas>
+            <div class="legend-line"><span><i style="background:var(--accent)"></i>longitudinal (+ accel / &minus; brake)</span><span><i id="lgLat"></i>lateral |a|</span></div>
+          </div>
+
+          <div class="panel">
+            <header><h2>g-g diagram</h2><span class="sp"></span><span class="desc">friction envelope dashed</span></header>
+            <canvas class="cv gg" id="cvGG"></canvas>
+            <div class="cbar"><span class="lab" id="cbGGLo">0</span><div class="g" id="cbGGG"></div><span class="lab" id="cbGGHi">km/h</span></div>
+          </div>
+          <div class="panel">
+            <header><h2>Time spent at speed</h2><span class="sp"></span><span class="desc">share of lap in each 10 km/h bin</span></header>
+            <canvas class="cv gg" id="cvHist"></canvas>
+            <div class="cbar"><span class="lab" id="cbHistLo">0</span><div class="g" id="cbHistG"></div><span class="lab" id="cbHistHi">km/h</span></div>
+          </div>
+
+          <div class="panel wide">
+            <header><h2>Corner report</h2><span class="sp"></span><span class="desc">slowest points on the lap</span></header>
+            <div class="scroll-x"><table class="data" id="cornerTable"></table></div>
+          </div>
+          <div class="panel wide">
+            <header><h2>Telemetry &mdash; hardest braking zone</h2><span class="sp"></span><span class="desc">station rows around peak brake power</span></header>
+            <div class="scroll-x"><table class="data" id="dutyTable"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ EXPORT ============ -->
+      <section class="view" data-view="export" hidden>
+        <div class="vhead">
+          <div class="eyebrow">Workflow &middot; step 4</div>
+          <h1>Export</h1>
+          <p>Generated from the solved lap. <b>Download</b> saves a real <span class="mono">.csv</span> / <span class="mono">.txt</span> file &mdash; this works when you run the app locally; inside the shared artifact downloads are blocked, so use <b>Copy</b> there. Structural / thermal / CFD tables are first-order estimates from the QSS model.</p>
+        </div>
+        <div class="grid">
+          <div class="panel wide">
+            <header><h2>Export bundle</h2><span class="sp"></span></header>
+            <div class="filerow">
+              <button class="btn" data-exp="motion" type="button">Motion &mdash; t / v / a</button>
+              <button class="btn" data-exp="telemetry" type="button">Telemetry (full)</button>
+              <button class="btn" data-exp="brake" type="button">Brake model pack</button>
+              <button class="btn" data-exp="geometry" type="button">Track geometry</button>
+              <button class="btn" data-exp="duty" type="button">Brake duty cycle</button>
+              <button class="btn" data-exp="structural" type="button">Structural load cases</button>
+              <button class="btn" data-exp="thermal" type="button">Transient thermal</button>
+              <button class="btn" data-exp="cfd" type="button">CFD operating points</button>
+              <button class="btn" data-exp="manifest" type="button">Manifest</button>
+            </div>
+            <div class="filerow">
+              <span class="mono" id="expName" style="color:var(--muted)">&mdash;</span>
+              <span class="sp" style="flex:1"></span>
+              <button class="btn sm" id="dlExpBtn" type="button">Download</button>
+              <button class="btn sm" id="dlAllBtn" type="button">Download all</button>
+              <button class="btn sm" id="copyExpBtn" type="button">Copy</button>
+            </div>
+            <textarea class="out" id="expOut" readonly style="min-height:320px" placeholder="pick an export"></textarea>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div class="statusbar" id="statusbar"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function () {
+  var g = 9.81;
+  var $ = function (id) { return document.getElementById(id); };
+  var round = function (x, n) { var p = Math.pow(10, n || 0); return Math.round((+x) * p) / p; };
+  var clamp = function (x, a, b) { return x < a ? a : x > b ? b : x; };
+  var fmt = function (x, n) { return Number.isFinite(x) ? (+x).toFixed(n == null ? 2 : n) : "--"; };
+
+  // ---------- defaults ----------
+  var DEF_VEH = {
+    mass_kg: 199.02, front_frac: 0.476, wheelbase_m: 1.530, track_m: 1.20, cg_height_m: 0.2845, tire_radius_m: 0.1778,
+    mu0: 1.35, mu_load_sens: 0.20, grip_factor: 0.95,
+    ClA_m2: 2.4, CdA_m2: 1.30, aero_balance: 0.45, air_density: 1.20,
+    power_kW: 52, drive_force_max_N: 3600, crr: 0.020,
+    brake_bias_front: 0.55, rotor_od_front_mm: 183, rotor_od_rear_mm: 165,
+    pad_height_front_mm: 34.5, pad_height_rear_mm: 25.0, pad_mu: 0.48, pedal_ratio: 3.4, brake_hyd_ratio: 6.0,
+    ride_height_front_mm: 30, ride_height_rear_mm: 30, wheelrate_front_Nmm: 35, wheelrate_rear_Nmm: 40, roll_grad_deg_g: 1.2
+  };
+  var VEH_SCHEMA = [
+    ["Mass & geometry", [
+      ["mass_kg", "Mass (no driver)", "kg", 0.01],
+      ["front_frac", "Static front fraction", "", 0.001],
+      ["wheelbase_m", "Wheelbase", "m", 0.001],
+      ["track_m", "Track (avg)", "m", 0.001],
+      ["cg_height_m", "CG height", "m", 0.0005],
+      ["tire_radius_m", "Tyre rolling radius", "m", 0.0005]
+    ]],
+    ["Tyres", [
+      ["mu0", "Peak friction &mu;0 (at ref load)", "", 0.01],
+      ["mu_load_sens", "Load sensitivity k", "", 0.01],
+      ["grip_factor", "Grip utilisation", "", 0.01]
+    ]],
+    ["Aero", [
+      ["ClA_m2", "Downforce ClA", "m2", 0.05],
+      ["CdA_m2", "Drag C_dA", "m2", 0.05],
+      ["aero_balance", "Aero balance (front)", "", 0.01],
+      ["air_density", "Air density &rho;", "kg/m3", 0.005]
+    ]],
+    ["Powertrain", [
+      ["power_kW", "Peak power (wheels)", "kW", 1],
+      ["drive_force_max_N", "Max drive force", "N", 50],
+      ["crr", "Rolling resistance", "", 0.001]
+    ]],
+    ["Brakes", [
+      ["brake_bias_front", "Brake bias (front)", "", 0.01],
+      ["rotor_od_front_mm", "Front rotor OD", "mm", 1],
+      ["rotor_od_rear_mm", "Rear rotor OD", "mm", 1],
+      ["pad_height_front_mm", "Front pad height", "mm", 0.5],
+      ["pad_height_rear_mm", "Rear pad height", "mm", 0.5],
+      ["pad_mu", "Pad friction", "", 0.01],
+      ["pedal_ratio", "Pedal ratio", "", 0.1],
+      ["brake_hyd_ratio", "Hydraulic ratio (caliper/MC area)", "", 0.1]
+    ]],
+    ["Suspension (ride height est.)", [
+      ["ride_height_front_mm", "Ride height front", "mm", 1],
+      ["ride_height_rear_mm", "Ride height rear", "mm", 1],
+      ["wheelrate_front_Nmm", "Wheel rate front", "N/mm", 1],
+      ["wheelrate_rear_Nmm", "Wheel rate rear", "N/mm", 1],
+      ["roll_grad_deg_g", "Roll gradient", "deg/g", 0.05]
+    ]]
+  ];
+  // FSAE Michigan competition events  -  locked rules. Accel & skidpad are exact to the rulebook;
+  // autocross & endurance layouts are rules-compliant representative courses (no official coordinate
+  // data is published, and they change yearly)  -  editable, with "Reset to FSAE layout".
+  var FSAE_RULES = {
+    acceleration: { course: "75 m straight, 4.9 m lane", bc: "standing start, free end", timing: "elapsed 0-75 m, best run", laps: 1 },
+    skidpad: { course: "2x 15.25 m dia circles, 3 m lane (R 9.125 m c/l)", bc: "steady-state, one full circle", timing: "avg of left & right timed laps", laps: 1 },
+    autocross: { course: "Autocross 2026 map  -  ~0.71 km, out-and-back + hairpin", bc: "standing start, one timed run", timing: "best of <= 4 runs", laps: 1 },
+    endurance: { course: "Endurance 2026 map  -  ~2.21 km/lap, 22 km total", bc: "periodic lap x N", timing: "total time; driver change at half", laps: "auto", target_m: 22000 }
+  };
+
+  // ---------- state ----------
+  var S = {
+    vehicle: Object.assign({}, DEF_VEH),
+    event: { type: "endurance", laps: 14, driver_kg: 68, ambient_C: 25, mu_scale: 1.0, skidpad_R: 9.125 },
+    solver: { mode: "quick", ds: 1.2, iters: 3, passes: 4 },
+    tracks: [],
+    activeId: null,
+    result: null,
+    resultStale: true
+  };
+  var KEY = "sdm.lapopt.v4";
+  function save() {
+    try {
+      var t = { vehicle: S.vehicle, event: S.event, solver: S.solver, tracks: S.tracks, activeId: S.activeId };
+      localStorage.setItem(KEY, JSON.stringify(t));
+    } catch (e) {}
+  }
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      if (!raw) return false;
+      var t = JSON.parse(raw);
+      if (t.vehicle) S.vehicle = Object.assign({}, DEF_VEH, t.vehicle);
+      if (t.event) S.event = Object.assign({}, S.event, t.event);
+      if (t.solver) S.solver = Object.assign({}, S.solver, t.solver);
+      if (Array.isArray(t.tracks) && t.tracks.length) S.tracks = t.tracks;
+      S.activeId = t.activeId || (S.tracks[0] && S.tracks[0].id);
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // ---------- FSAE Michigan 2026 tracks ----------
+  function uid() { return "t" + Math.random().toString(36).slice(2, 8); }
+  function circleNodes(R, n) { var p = []; for (var i = 0; i < n; i++) { var t = i / n * 2 * Math.PI; p.push([R * Math.cos(t), R * Math.sin(t)]); } return p; }
+  // Centrelines auto-extracted from the official "Endurance 2026" / "Autocross 2026"
+  // course maps (Sept 2026 re-trace): colour-segment the drawn line, skeletonize,
+  // graph the loop, sub-pixel centre, resample. Scale locked to the printed grid:
+  //   endurance 100 ft = 39.69 px  -> 0.7679 m/px   (fit over 26 gridlines, resid 0.5 px)
+  //   autocross 100 ft = 45.92 px  -> 0.6645 m/px   (fit over 17 axis labels, resid 0.4 px)
+  // NB: this supersedes the earlier 0.6684 / 0.5502 m/px calibration, which was ~13 %
+  // (endurance) / ~19 % (autocross) undersized. Metres, ~13-17 m node spacing.
+  // Endurance ~2.21 km/lap (closed), autocross ~0.71 km (open, standing start -> flag).
+  // Endurance start node is on the main straight; autocross node[0] = green start flag,
+  // last node = chequered finish. See ../sdm-lapsim-webapp/maps + trace notes in README.
+  var EN_NODES = [[365.2,264.4],[379.3,262.9],[395.4,259.9],[411.8,261.6],[428.2,257.5],[444.8,254.8],[461.8,256.0],[478.7,256.3],[495.6,255.4],[512.4,253.8],[529.4,252.7],[546.3,252.7],[562.3,253.4],[578.3,252.4],[594.7,253.8],[611.3,256.2],[627.7,260.6],[644.6,262.0],[660.0,269.0],[676.2,274.2],[688.7,267.9],[684.3,251.5],[681.4,234.7],[675.1,219.4],[672.4,202.9],[666.8,187.1],[662.8,170.8],[660.6,154.3],[657.1,139.1],[669.0,127.2],[672.2,110.7],[678.3,95.0],[676.8,78.1],[681.1,61.6],[677.6,47.8],[661.1,43.8],[652.0,30.7],[663.4,20.9],[679.4,23.9],[690.1,11.5],[679.2,2.8],[662.6,5.7],[646.2,4.8],[629.8,8.2],[613.0,7.2],[597.8,8.5],[582.6,11.4],[567.4,8.1],[553.3,15.5],[540.5,25.8],[523.8,23.9],[508.5,16.4],[492.6,11.5],[477.6,19.1],[464.6,29.0],[449.5,35.5],[432.7,34.1],[418.9,24.4],[407.1,12.2],[391.8,5.3],[375.4,2.0],[364.1,14.0],[360.5,29.0],[346.8,28.0],[333.1,17.9],[319.6,7.6],[304.8,3.5],[298.2,19.1],[286.5,29.2],[275.1,16.9],[262.3,7.4],[245.5,5.4],[230.0,9.1],[213.2,7.5],[196.7,7.3],[179.8,9.5],[166.8,15.4],[154.1,13.6],[138.8,17.5],[124.2,26.0],[109.3,34.3],[100.0,26.3],[102.6,9.5],[90.8,10.8],[83.1,25.9],[72.8,37.9],[58.4,32.3],[45.1,22.4],[32.1,11.7],[15.5,13.6],[17.8,28.1],[9.5,39.3],[4.1,53.7],[2.0,69.9],[5.3,85.6],[6.8,102.2],[9.7,118.7],[12.9,135.2],[17.2,151.5],[21.2,167.8],[26.1,184.0],[25.4,200.8],[31.6,216.4],[32.0,233.2],[27.3,249.5],[42.0,248.8],[57.2,241.2],[73.6,236.7],[89.3,230.2],[105.6,225.5],[120.9,218.0],[135.4,209.3],[147.8,197.7],[158.9,184.9],[169.7,171.7],[180.5,158.7],[195.6,152.3],[208.4,163.2],[224.3,169.3],[236.9,179.4],[246.1,191.8],[253.6,206.4],[264.3,217.5],[274.2,229.4],[278.7,244.9],[291.6,255.2],[307.0,256.0],[321.9,249.7],[334.6,256.4],[349.8,257.6]];
+  var AX_NODES = [[2.0,32.8],[12.7,36.0],[23.8,36.9],[34.9,37.4],[45.9,37.4],[54.2,30.2],[64.3,26.2],[74.5,29.7],[80.4,38.9],[91.4,39.7],[102.5,38.8],[113.6,37.7],[124.5,39.3],[135.1,36.5],[145.9,38.1],[156.4,35.5],[167.5,36.0],[175.1,30.4],[185.9,29.3],[197.0,29.3],[206.1,33.3],[215.6,36.4],[226.5,34.3],[237.4,31.9],[248.2,33.6],[258.1,38.5],[268.6,35.1],[279.2,32.2],[289.3,36.8],[299.6,40.8],[310.7,41.5],[321.6,39.4],[332.2,36.1],[343.2,37.0],[352.6,33.5],[351.8,22.4],[357.2,12.8],[356.8,3.7],[345.8,2.0],[334.7,2.3],[325.9,8.2],[320.0,17.3],[309.6,14.4],[299.8,9.0],[289.4,11.2],[278.7,14.3],[267.8,12.5],[257.3,9.2],[246.4,11.4],[235.4,10.9],[225.4,6.2],[214.7,3.6],[203.9,5.9],[193.0,4.6],[182.2,6.4],[171.1,5.6],[160.1,5.7],[150.1,10.6],[139.4,12.9],[128.5,10.8],[117.4,11.1],[106.2,11.6],[95.1,10.8],[84.1,9.5],[73.0,7.8]];
+  function fsaePresets() {
+    return [
+      { name: "fsae_accel", presetFor: "acceleration", closed: false, halfWidth: 2.45, source: "fsae",
+        nodes: [[0, 0], [15, 0], [30, 0], [45, 0], [60, 0], [75, 0]] },
+      { name: "fsae_skidpad", presetFor: "skidpad", closed: true, halfWidth: 1.5, source: "fsae",
+        nodes: circleNodes(9.125, 28) },
+      { name: "fsae_autocross", presetFor: "autocross", closed: false, halfWidth: 1.9, source: "fsae",
+        nodes: AX_NODES.map(function (p) { return p.slice(); }) },
+      { name: "fsae_endurance", presetFor: "endurance", closed: true, halfWidth: 2.0, source: "fsae",
+        nodes: EN_NODES.map(function (p) { return p.slice(); }) }
+    ];
+  }
+  function seedTracks() {
+    S.tracks = fsaePresets().map(function (t) { t.id = uid(); t.defaultEvent = t.presetFor; return t; });
+    S.activeId = presetTrackFor("endurance").id;
+    applyEventLock("endurance");
+  }
+  function presetTrackFor(type) { return S.tracks.filter(function (t) { return t.presetFor === type; })[0] || null; }
+  function applyEventLock(type) {
+    S.event.type = type;
+    var r = FSAE_RULES[type];
+    if (type === "endurance") {
+      var at = activeTrack();
+      var tr = (at && (at.presetFor === "endurance" || at.defaultEvent === "endurance")) ? at : presetTrackFor("endurance");
+      var m = tr ? buildMesh(tr, 2) : null;
+      S.event.laps = m ? Math.max(1, Math.round(r.target_m / m.total)) : 22;
+    } else S.event.laps = r.laps;
+    S.event.skidpad_R = 9.125;
+  }
+  function activeTrack() { return S.tracks.filter(function (t) { return t.id === S.activeId; })[0] || S.tracks[0]; }
+
+  // ---------- geometry ----------
+  function catmull(p0, p1, p2, p3, u) {
+    var u2 = u * u, u3 = u2 * u;
+    return [
+      0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * u + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * u2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * u3),
+      0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * u + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * u2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * u3)
+    ];
+  }
+  function centerlinePolyline(nodes, closed, per) {
+    var n = nodes.length;
+    if (n < 2) return nodes.map(function (p) { return p.slice(); });
+    if (n === 2) { var o = []; for (var t = 0; t <= per; t++) { var u = t / per; o.push([nodes[0][0] + u * (nodes[1][0] - nodes[0][0]), nodes[0][1] + u * (nodes[1][1] - nodes[0][1])]); } return o; }
+    var pts = [], segs = closed ? n : n - 1;
+    for (var i = 0; i < segs; i++) {
+      var p0 = nodes[closed ? (i - 1 + n) % n : Math.max(0, i - 1)];
+      var p1 = nodes[i % n], p2 = nodes[(i + 1) % n];
+      var p3 = nodes[closed ? (i + 2) % n : Math.min(n - 1, i + 2)];
+      for (var k = 0; k < per; k++) pts.push(catmull(p0, p1, p2, p3, k / per));
+    }
+    if (closed) pts.push(pts[0].slice()); else pts.push(nodes[n - 1].slice());
+    return pts;
+  }
+  function dist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+  function menger(ax, ay, bx, by, cx, cy) {
+    var area2 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    var d = Math.hypot(bx - ax, by - ay) * Math.hypot(cx - bx, cy - by) * Math.hypot(ax - cx, ay - cy);
+    if (d < 1e-9) return 0;
+    return 2 * area2 / d;
+  }
+  function smoothArr(a, closed, w) {
+    var n = a.length, out = new Float64Array(n);
+    for (var i = 0; i < n; i++) {
+      var s = 0, c = 0;
+      for (var j = -w; j <= w; j++) {
+        var k = i + j;
+        if (closed) k = (k + n) % n; else if (k < 0 || k >= n) continue;
+        s += a[k]; c++;
+      }
+      out[i] = s / c;
+    }
+    return out;
+  }
+  function buildMesh(track, ds) {
+    var poly = centerlinePolyline(track.nodes, track.closed, 10);
+    var cum = [0];
+    for (var i = 1; i < poly.length; i++) cum.push(cum[i - 1] + dist(poly[i - 1], poly[i]));
+    var total = cum[cum.length - 1];
+    if (total < 1) return null;
+    var N = Math.max(8, Math.round(total / ds));
+    var step = total / N;
+    var X = new Float64Array(N), Y = new Float64Array(N), Sarr = new Float64Array(N);
+    var j = 0;
+    for (var q = 0; q < N; q++) {
+      var target = q * step;
+      while (j < cum.length - 2 && cum[j + 1] < target) j++;
+      var seg = (cum[j + 1] - cum[j]) || 1e-9;
+      var f = (target - cum[j]) / seg;
+      Sarr[q] = target;
+      X[q] = poly[j][0] + f * (poly[j + 1][0] - poly[j][0]);
+      Y[q] = poly[j][1] + f * (poly[j + 1][1] - poly[j][1]);
+    }
+    var K = new Float64Array(N), w = 2;
+    for (var m = 0; m < N; m++) {
+      var a = m - w, c = m + w;
+      if (track.closed) { a = (a + N) % N; c = (c + N) % N; }
+      else if (a < 0 || c >= N) { K[m] = 0; continue; }
+      K[m] = menger(X[a], Y[a], X[m], Y[m], X[c], Y[c]);
+    }
+    K = smoothArr(K, track.closed, 2);
+    // FSAE course rules: hairpin >= 9 m outside dia, track >= 3.5 m wide -> centreline radius
+    // never below ~3.5 m. Anything tighter in a traced line is an extraction artifact; clamp it.
+    var kClamp = 1 / 3.5;
+    for (var cc = 0; cc < N; cc++) K[cc] = clamp(K[cc], -kClamp, kClamp);
+    var minR = Infinity;
+    for (var r = 0; r < N; r++) { var kk = Math.abs(K[r]); if (kk > 1e-4) minR = Math.min(minR, 1 / kk); }
+    return { s: Sarr, x: X, y: Y, kappa: K, ds: step, N: N, total: total, closed: track.closed, minR: minR };
+  }
+
+  // ---------- vehicle derived ----------
+  function derive(veh, ev) {
+    var m = veh.mass_kg + (ev.driver_kg || 0);
+    var rho = 1.225 * 288.15 / (273.15 + (ev.ambient_C == null ? 25 : ev.ambient_C));
+    rho = (veh.air_density > 0 ? veh.air_density : rho);
+    var FzRef = m * g / 4;
+    // terminal speed: P = (0.5 rho CdA v^2 + crr m g) v
+    var v = 20;
+    for (var i = 0; i < 40; i++) {
+      var drag = 0.5 * rho * veh.CdA_m2 * v * v + veh.crr * m * g;
+      var vn = Math.pow(veh.power_kW * 1000 / Math.max(drag, 1), 1); // drag*v = P -> v=P/drag
+      v = 0.5 * v + 0.5 * (veh.power_kW * 1000 / Math.max(drag, 1));
+    }
+    var vCap = clamp(v, 15, 70);
+    var rEffF = (veh.rotor_od_front_mm / 2 - veh.pad_height_front_mm / 2) / 1000;
+    var rEffR = (veh.rotor_od_rear_mm / 2 - veh.pad_height_rear_mm / 2) / 1000;
+    return { m: m, rho: rho, FzRef: FzRef, vCap: vCap, rEffF: rEffF, rEffR: rEffR };
+  }
+  function tyreMu(veh, d, ev, FzWheel) {
+    var mu = veh.mu0 * Math.pow(Math.max(FzWheel, 50) / d.FzRef, -veh.mu_load_sens);
+    var gf = veh.grip_factor > 0 ? veh.grip_factor : 1;
+    return mu * (ev.mu_scale || 1) * gf;
+  }
+  // Max combined grip acceleration (m/s^2) available at the tyres, after load transfer.
+  // A load-sensitive mu means shifting weight onto the loaded tyres returns less total grip
+  // than a flat "mu * mg / m" 4-wheel model -- this is the main reason simple lap sims run hot.
+  // aLat / aLong are the current accelerations (m/s^2) driving the transfer.
+  function gripAccel(veh, d, ev, FzTot, aLat, aLong) {
+    if (FzTot <= 0) return 0;
+    var perW = FzTot / 4;
+    var dLong = d.m * (aLong || 0) * veh.cg_height_m / veh.wheelbase_m / 2;   // per wheel; <0 braking -> front heavier
+    var dLat = d.m * Math.abs(aLat || 0) * veh.cg_height_m / veh.track_m / 2;  // per wheel; to the outer
+    function pair(halfW) {                        // one axle: inner + outer wheel
+      var Fi = halfW - dLat, Fo = halfW + dLat;
+      if (Fi < 0) { Fo = 2 * halfW; Fi = 0; }     // inner tyre lifts, outer carries the pair
+      return tyreMu(veh, d, ev, Fi) * Fi + tyreMu(veh, d, ev, Fo) * Fo;
+    }
+    var gripN = pair(Math.max(perW - dLong, 0)) + pair(Math.max(perW + dLong, 0));
+    return gripN / d.m;
+  }
+
+  // ---------- solver ----------
+  function solve(track, veh, ev, sv, logf) {
+    var d = derive(veh, ev);
+    var t0 = performance.now();
+    logf && logf("event: " + ev.type + "  track: " + track.name);
+    if (ev.type === "skidpad") return solveSkidpad(veh, ev, d, logf);
+
+    var closed = track.closed && ev.type !== "acceleration";
+    var mesh = buildMesh(track, sv.ds);
+    if (!mesh) { logf && logf("track too short"); return null; }
+    var N = mesh.N, ds = mesh.ds, K = mesh.kappa;
+    var m = d.m, rho = d.rho;
+    logf && logf("mesh: N=" + N + "  ds=" + fmt(ds, 2) + " m  length=" + fmt(mesh.total, 1) + " m");
+
+    // corner speed limit
+    var vmax = new Float64Array(N);
+    for (var i = 0; i < N; i++) {
+      var vv = 25;
+      var kap = Math.abs(K[i]);
+      for (var it = 0; it < sv.iters; it++) {
+        var q = 0.5 * rho * vv * vv;
+        var Fz = m * g + veh.ClA_m2 * q;
+        var ay = gripAccel(veh, d, ev, Fz, kap * vv * vv, 0);
+        vv = kap > 1e-5 ? Math.sqrt(ay / kap) : d.vCap;
+        vv = Math.min(vv, d.vCap);
+      }
+      vmax[i] = vv;
+    }
+
+    var vf = Float64Array.from(vmax), vb = Float64Array.from(vmax);
+    var nextI = function (i) { return closed ? (i + 1) % N : i + 1; };
+    var prevI = function (i) { return closed ? (i - 1 + N) % N : i - 1; };
+
+    // forward: traction / power limited
+    var fPasses = closed ? Math.max(2, sv.passes) : 1;
+    for (var p = 0; p < fPasses; p++) {
+      if (!closed) vf[0] = 0; // standing start
+      for (var f = 0; f < (closed ? N : N - 1); f++) {
+        var ni = nextI(f);
+        var v1 = vf[f];
+        var Q = 0.5 * rho * v1 * v1;
+        var Fdo = veh.ClA_m2 * Q, Fdr = veh.CdA_m2 * Q, Frr = veh.crr * m * g;
+        var FzT = m * g + Fdo;
+        var alat = v1 * v1 * Math.abs(K[f]);
+        var agrip = gripAccel(veh, d, ev, FzT, alat, 0);
+        var alongGrip = Math.sqrt(Math.max(0, agrip * agrip - alat * alat));
+        // rear axle (RWD) traction -- longitudinal load transfer feeds the driven axle
+        var aEst = alongGrip > 0 ? Math.min(alongGrip, 0.9 * g) : 0.5 * g;
+        var dRear = m * aEst * veh.cg_height_m / veh.wheelbase_m;
+        var FzRear = m * g * (1 - veh.front_frac) + Fdo * (1 - veh.aero_balance) + dRear;
+        var muR = tyreMu(veh, d, ev, FzRear / 2);
+        var Ftrac = muR * FzRear;
+        var Feng = Math.min(veh.power_kW * 1000 / Math.max(v1, 3), veh.drive_force_max_N, Ftrac);
+        var aEng = (Feng - Fdr - Frr) / m;
+        var along = Math.min(alongGrip, Math.max(aEng, -0.2));
+        var v2 = Math.sqrt(Math.max(0, v1 * v1 + 2 * along * ds));
+        v2 = Math.min(v2, vmax[ni]);
+        if (v2 < vf[ni]) vf[ni] = v2;
+      }
+    }
+    // backward: braking limited
+    var bPasses = closed ? Math.max(2, sv.passes) : 2;
+    for (var pb = 0; pb < bPasses; pb++) {
+      for (var b = (closed ? N - 1 : N - 2); b >= 0; b--) {
+        var pi = prevI(b);
+        if (pi < 0) continue;
+        var vb2 = vb[b];
+        var Qb = 0.5 * rho * vb2 * vb2;
+        var Fdob = veh.ClA_m2 * Qb, Fdrb = veh.CdA_m2 * Qb, Frrb = veh.crr * m * g;
+        var FzTb = m * g + Fdob;
+        var alatb = vb2 * vb2 * Math.abs(K[b]);
+        var agN = tyreMu(veh, d, ev, FzTb / 4) * FzTb / m;                       // naive, for the transfer estimate
+        var alB0 = Math.sqrt(Math.max(0, agN * agN - alatb * alatb));
+        var agripb = gripAccel(veh, d, ev, FzTb, alatb, -alB0);                  // grip after fwd load transfer
+        var alongB = Math.sqrt(Math.max(0, agripb * agripb - alatb * alatb));
+        var aBrakeTot = alongB + Fdrb / m + Frrb / m;
+        var vp = Math.sqrt(Math.max(0, vb2 * vb2 + 2 * aBrakeTot * ds));
+        vp = Math.min(vp, vmax[pi]);
+        if (vp < vb[pi]) vb[pi] = vp;
+      }
+    }
+
+    var v = new Float64Array(N);
+    for (var c2 = 0; c2 < N; c2++) v[c2] = Math.min(vmax[c2], vf[c2], vb[c2]);
+
+    // time
+    var tarr = new Float64Array(N);
+    for (var tt = 0; tt < N - 1; tt++) tarr[tt + 1] = tarr[tt] + ds / Math.max(0.5 * (v[tt] + v[tt + 1]), 0.5);
+    var lapTime = closed ? tarr[N - 1] + ds / Math.max(0.5 * (v[N - 1] + v[0]), 0.5) : tarr[N - 1];
+
+    // accelerations, loads
+    var aLong = new Float64Array(N), aLat = new Float64Array(N);
+    for (var e = 0; e < N; e++) {
+      var ip, im, span;
+      if (closed) { ip = (e + 1) % N; im = (e - 1 + N) % N; span = 2 * ds; }
+      else { ip = Math.min(N - 1, e + 1); im = Math.max(0, e - 1); span = (ip - im) * ds || ds; }
+      aLong[e] = (v[ip] * v[ip] - v[im] * v[im]) / (2 * span);
+      aLat[e] = v[e] * v[e] * K[e];
+    }
+    var Fz = { fl: new Float64Array(N), fr: new Float64Array(N), rl: new Float64Array(N), rr: new Float64Array(N) };
+    var Fbrake = new Float64Array(N), Pbrake = new Float64Array(N), steer = new Float64Array(N), Pdrive = new Float64Array(N);
+    for (var s2 = 0; s2 < N; s2++) {
+      var vs = v[s2], Qs = 0.5 * rho * vs * vs;
+      var Fdos = veh.ClA_m2 * Qs, Fdrs = veh.CdA_m2 * Qs, Frrs = veh.crr * m * g;
+      var alo = aLong[s2], ala = aLat[s2], alaM = Math.abs(ala);
+      var axleF = m * g * veh.front_frac + Fdos * veh.aero_balance - m * alo * veh.cg_height_m / veh.wheelbase_m;
+      var axleR = m * g * (1 - veh.front_frac) + Fdos * (1 - veh.aero_balance) + m * alo * veh.cg_height_m / veh.wheelbase_m;
+      var dLat = m * alaM * veh.cg_height_m / veh.track_m / 2;
+      var sgn = K[s2] >= 0 ? 1 : -1; // +kappa: load to the -side wheels get less; put transfer on outer
+      var fL = axleF / 2 - sgn * dLat, fR = axleF / 2 + sgn * dLat;
+      var rL = axleR / 2 - sgn * dLat, rR = axleR / 2 + sgn * dLat;
+      Fz.fl[s2] = Math.max(0, fL); Fz.fr[s2] = Math.max(0, fR);
+      Fz.rl[s2] = Math.max(0, rL); Fz.rr[s2] = Math.max(0, rR);
+      var fbr = m * (-alo) - Fdrs - Frrs;
+      Fbrake[s2] = fbr > 0 ? fbr : 0;
+      Pbrake[s2] = Fbrake[s2] * vs;
+      Pdrive[s2] = alo > 0 ? (m * alo + Fdrs + Frrs) * vs : 0;
+      steer[s2] = Math.atan(veh.wheelbase_m * K[s2]) * 180 / Math.PI;
+    }
+
+    var res = pack(mesh, v, tarr, aLong, aLat, Fz, Fbrake, Pbrake, steer, lapTime, closed, ev, "QSS (" + sv.mode + ")", Pdrive);
+    logf && logf("solved in " + fmt(performance.now() - t0, 1) + " ms  ->  lap " + fmt(lapTime, 3) + " s");
+    return res;
+  }
+
+  function solveSkidpad(veh, ev, d, logf) {
+    var R = 9.125, m = d.m, rho = d.rho, kap = 1 / R; // FSAE spec centreline radius, locked
+    var v = 12;
+    for (var i = 0; i < 30; i++) {
+      var q = 0.5 * rho * v * v, Fz = m * g + veh.ClA_m2 * q;
+      var ay = gripAccel(veh, d, ev, Fz, v * v * kap, 0);
+      v = Math.sqrt(ay / kap);
+    }
+    var lapT = 2 * Math.PI * R / v;
+    var alat = v * v * kap;
+    var N = 72, mesh = { s: new Float64Array(N), x: new Float64Array(N), y: new Float64Array(N), kappa: new Float64Array(N), ds: 2 * Math.PI * R / N, N: N, total: 2 * Math.PI * R, closed: true, minR: R };
+    var vA = new Float64Array(N), tA = new Float64Array(N), aLo = new Float64Array(N), aLa = new Float64Array(N), st = new Float64Array(N);
+    var Fz = { fl: new Float64Array(N), fr: new Float64Array(N), rl: new Float64Array(N), rr: new Float64Array(N) };
+    for (var k = 0; k < N; k++) {
+      var a = k / N * 2 * Math.PI;
+      mesh.s[k] = a * R; mesh.x[k] = R * Math.cos(a); mesh.y[k] = R * Math.sin(a); mesh.kappa[k] = kap;
+      vA[k] = v; tA[k] = a * R / v; aLo[k] = 0; aLa[k] = alat; st[k] = Math.atan(veh.wheelbase_m * kap) * 180 / Math.PI;
+      var q2 = 0.5 * rho * v * v, Fdo = veh.ClA_m2 * q2;
+      var axleF = m * g * veh.front_frac + Fdo * veh.aero_balance, axleR = m * g * (1 - veh.front_frac) + Fdo * (1 - veh.aero_balance);
+      var dLat = m * alat * veh.cg_height_m / veh.track_m / 2;
+      Fz.fl[k] = Math.max(0, axleF / 2 - dLat); Fz.fr[k] = Math.max(0, axleF / 2 + dLat);
+      Fz.rl[k] = Math.max(0, axleR / 2 - dLat); Fz.rr[k] = Math.max(0, axleR / 2 + dLat);
+    }
+    var res = pack(mesh, vA, tA, aLo, aLa, Fz, new Float64Array(N), new Float64Array(N), st, lapT, true, ev, "skidpad closed-form");
+    res.skidpad = { R: R, v: v };
+    logf && logf("skidpad: v=" + fmt(v, 2) + " m/s  lat=" + fmt(alat / g, 2) + " g  lap=" + fmt(lapT, 3) + " s");
+    return res;
+  }
+
+  function pack(mesh, v, t, aLong, aLat, Fz, Fbrake, Pbrake, steer, lapTime, closed, ev, method, Pdrive) {
+    var N = mesh.N, vMax = 0, vMin = 1e9, aLatMax = 0, aAcc = 0, aBr = 0, peakP = 0, aBrTyre = 0;
+    var mTot = (S.vehicle.mass_kg + (ev.driver_kg || 0));
+    var gg = [], nCorner = 0, nBrake = 0, nAccel = 0, nStraight = 0;
+    Pdrive = Pdrive || new Float64Array(N);
+    var iSkip = closed ? 0 : Math.max(1, Math.round(15 / mesh.ds));  // open course: ignore the standing-start ramp
+    for (var i = 0; i < N; i++) {
+      vMax = Math.max(vMax, v[i]);
+      if (i >= iSkip) vMin = Math.min(vMin, v[i]);
+      aLatMax = Math.max(aLatMax, Math.abs(aLat[i]));
+      aAcc = Math.max(aAcc, aLong[i]); aBr = Math.min(aBr, aLong[i]);
+      aBrTyre = Math.max(aBrTyre, Fbrake[i] / mTot);   // tyre-only decel (excludes aero drag + rolling)
+      peakP = Math.max(peakP, Pdrive[i]);
+      if (i % 2 === 0) gg.push([aLat[i] / g, aLong[i] / g, v[i]]);
+      var brk = aLong[i] < -0.35 * g, cor = Math.abs(aLat[i]) > 0.35 * g;
+      if (brk) nBrake++;
+      else if (aLong[i] > 0.35 * g) nAccel++;
+      if (cor) nCorner++; else if (!brk && aLong[i] <= 0.35 * g) nStraight++;
+    }
+    var brakeE = 0, dt = new Float64Array(N);
+    for (var k = 0; k < N - 1; k++) { dt[k] = t[k + 1] - t[k]; brakeE += Pbrake[k] * dt[k]; }
+    dt[N - 1] = dt[N - 2] || 0;
+    // corner list: local speed minima, spatially de-duped, slowest first
+    var cand = [];
+    for (var c = 3; c < N - 3; c++) {
+      if (v[c] <= v[c - 3] && v[c] <= v[c + 3] && v[c] < 0.9 * vMax) {
+        cand.push({ idx: c, s: mesh.s[c], v: v[c], R: Math.abs(mesh.kappa[c]) > 1e-4 ? 1 / Math.abs(mesh.kappa[c]) : Infinity, aLat_g: Math.abs(aLat[c]) / g });
+      }
+    }
+    cand.sort(function (a, b) { return a.v - b.v; });
+    var corners = [];
+    cand.forEach(function (x) { if (!corners.some(function (y) { return Math.abs(y.s - x.s) < 25; })) corners.push(x); });
+    corners = corners.slice(0, 10).sort(function (a, b) { return a.s - b.s; });
+    var back = Math.max(20, Math.round(80 / mesh.ds));
+    corners.forEach(function (x, n) {
+      x.n = n + 1;
+      // find peak-braking station within reach before the apex, then measure to apex
+      var pk = x.idx;
+      for (var q = x.idx; q > Math.max(1, x.idx - back); q--) if (aLong[q] < aLong[pk]) pk = q;
+      var b = pk, bd = 0;
+      while (b > 1 && aLong[b] < -0.1 * g) { bd += (mesh.s[b] - mesh.s[b - 1]); b--; }
+      for (var f = pk; f < x.idx; f++) bd += (mesh.s[f + 1] - mesh.s[f]);
+      x.entryV = v[Math.max(0, b)]; x.brakeDist = bd;
+    });
+    return {
+      mesh: mesh, v: v, t: t, dt: dt, aLong: aLong, aLat: aLat, Fz: Fz, Fbrake: Fbrake, Pbrake: Pbrake, Pdrive: Pdrive, steer: steer,
+      lapTime: lapTime, closed: closed, method: method, eventType: ev.type, corners: corners,
+      summary: {
+        lapTime: lapTime, vMax: vMax, vMin: vMin, vMaxKmh: vMax * 3.6, vMinKmh: vMin * 3.6,
+        avgKmh: mesh.total / lapTime * 3.6, distance_m: mesh.total,
+        aLatMax_g: aLatMax / g, aAcc_g: aAcc / g, aBr_g: aBr / g, aBrTyre_g: aBrTyre / g,
+        peakPower_kW: peakP / 1000,
+        pctCorner: nCorner / N, pctBrake: nBrake / N, pctAccel: nAccel / N,
+        brakeEnergy_kJ: brakeE / 1000, laps: ev.laps || 1
+      },
+      gg: gg
+    };
+  }
+
+  // ---------- run / recompute ----------
+  var toastT;
+  function toast(msg) {
+    var el = $("toast"); el.textContent = msg; el.classList.add("show");
+    clearTimeout(toastT); toastT = setTimeout(function () { el.classList.remove("show"); }, 1600);
+  }
+  function markStale() { S.resultStale = true; S.result = null; refreshLap(); }
+  function refreshLap() {
+    var r = $("lapReadout");
+    if (S.result) { r.innerHTML = "lap <b>" + fmt(S.result.lapTime, 3) + " s</b>"; r.classList.remove("stale"); }
+    else { r.innerHTML = "lap <b>needs solve</b>"; r.classList.add("stale"); }
+  }
+  function runSolve() {
+    syncSolverInputs();
+    var log = [];
+    var lf = function (s) { log.push(s); };
+    var res = solve(activeTrack(), S.vehicle, S.event, S.solver, lf);
+    $("runLog").value = log.join("\n");
+    if (!res) { toast("solve failed  -  check the track"); return; }
+    S.result = res; S.resultStale = false;
+    renderRunResult(); renderResults(); refreshLap(); save();
+    toast("lap " + fmt(res.lapTime, 3) + " s");
+  }
+
+  // ---------- render: track editor ----------
+  var ed = { view: null, drag: -1, mode: "move", raf: 0, editing: false };
+  function isEditable(t) { return t && t.source === "user"; }
+  function setEditing(on) {
+    ed.editing = on;
+    $("edEdit").hidden = !on;
+    $("editTrackBtn").hidden = on;
+    $("doneEditBtn").hidden = !on;
+    $("setupView").classList.toggle("editing", on);
+    if (!on) ed.drag = -1;
+    drawEditor();
+  }
+  function fitView() {
+    var tr = activeTrack();
+    var xs = tr.nodes.map(function (p) { return p[0]; }), ys = tr.nodes.map(function (p) { return p[1]; });
+    var minx = Math.min.apply(null, xs), maxx = Math.max.apply(null, xs);
+    var miny = Math.min.apply(null, ys), maxy = Math.max.apply(null, ys);
+    var pw = (maxx - minx) || 10, ph = (maxy - miny) || 10, pad = 0.16;
+    var cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
+    var w = pw * (1 + 2 * pad), h = ph * (1 + 2 * pad);
+    var r = $("edSvg").getBoundingClientRect();
+    var aspect = r.width > 4 && r.height > 4 ? r.width / r.height : 1.7;
+    if (w / h > aspect) h = w / aspect; else w = h * aspect;
+    ed.view = { x: cx - w / 2, y: cy - h / 2, w: w, h: h };
+    drawEditor();
+  }
+  function svgPointToWorld(evt) {
+    var svg = $("edSvg"), r = svg.getBoundingClientRect();
+    var vb = ed.view;
+    var fx = (evt.clientX - r.left) / r.width, fy = (evt.clientY - r.top) / r.height;
+    return [vb.x + fx * vb.w, vb.y + fy * vb.h];
+  }
+  function drawEditor() {
+    var svg = $("edSvg"), tr = activeTrack();
+    if (!ed.view) { fitView(); return; }
+    var vb = ed.view;
+    svg.setAttribute("viewBox", vb.x + " " + vb.y + " " + vb.w + " " + vb.h);
+    var poly = centerlinePolyline(tr.nodes, tr.closed, 10);
+    var mesh = buildMesh(tr, +$("dsRange").value);
+    var parts = [];
+    // corridor as offset polygon
+    if (mesh) {
+      var left = [], right = [];
+      for (var i = 0; i < mesh.N; i++) {
+        var ip = mesh.closed ? (i + 1) % mesh.N : Math.min(mesh.N - 1, i + 1);
+        var im = mesh.closed ? (i - 1 + mesh.N) % mesh.N : Math.max(0, i - 1);
+        var tx = mesh.x[ip] - mesh.x[im], ty = mesh.y[ip] - mesh.y[im];
+        var L = Math.hypot(tx, ty) || 1; tx /= L; ty /= L;
+        var nx = -ty, ny = tx, hw = tr.halfWidth;
+        left.push([mesh.x[i] + nx * hw, mesh.y[i] + ny * hw]);
+        right.push([mesh.x[i] - nx * hw, mesh.y[i] - ny * hw]);
+      }
+      var d = "M" + left.map(function (p) { return p[0].toFixed(2) + " " + p[1].toFixed(2); }).join(" L ");
+      d += " L " + right.reverse().map(function (p) { return p[0].toFixed(2) + " " + p[1].toFixed(2); }).join(" L ") + " Z";
+      parts.push('<path class="corridor" d="' + d + '"/>');
+    }
+    // centreline
+    var cd = "M" + poly.map(function (p) { return p[0].toFixed(2) + " " + p[1].toFixed(2); }).join(" L ");
+    parts.push('<path class="centreline" d="' + cd + '"/>');
+    // curvature strip (ticks perpendicular, length ~ kappa)
+    if (mesh) {
+      var kmax = 0; for (var z = 0; z < mesh.N; z++) kmax = Math.max(kmax, Math.abs(mesh.kappa[z]));
+      var sc = kmax > 0 ? (Math.min(vb.w, vb.h) * 0.08) / kmax : 0;
+      for (var q = 0; q < mesh.N; q += 2) {
+        var ip2 = (q + 1) % mesh.N, im2 = (q - 1 + mesh.N) % mesh.N;
+        var txx = mesh.x[ip2] - mesh.x[im2], tyy = mesh.y[ip2] - mesh.y[im2];
+        var LL = Math.hypot(txx, tyy) || 1; txx /= LL; tyy /= LL;
+        var nxx = -tyy, nyy = txx, kv = mesh.kappa[q] * sc;
+        parts.push('<line class="kstrip" x1="' + mesh.x[q].toFixed(2) + '" y1="' + mesh.y[q].toFixed(2) + '" x2="' + (mesh.x[q] + nxx * kv).toFixed(2) + '" y2="' + (mesh.y[q] + nyy * kv).toFixed(2) + '"/>');
+      }
+    }
+    // nodes  -  only while editing
+    if (ed.editing) {
+      var rr = vb.w * 0.012;
+      tr.nodes.forEach(function (p, idx) {
+        parts.push('<circle class="node' + (idx === 0 ? ' sf' : '') + '" data-i="' + idx + '" cx="' + p[0].toFixed(2) + '" cy="' + p[1].toFixed(2) + '" r="' + rr.toFixed(2) + '"/>');
+      });
+    }
+    svg.innerHTML = parts.join("");
+    // stats
+    if (mesh) {
+      $("stLen").textContent = fmt(mesh.total, 1) + " m";
+      $("stR").textContent = isFinite(mesh.minR) ? fmt(mesh.minR, 2) + " m" : "Inf";
+      $("stN").textContent = mesh.N;
+    }
+    $("stNodes").textContent = tr.nodes.length;
+    $("stSrc").textContent = tr.source === "fsae" ? "FSAE preset" :
+      tr.source === "user" ? ("my track" + (tr.origin ? " (from " + tr.origin + ")" : "")) : tr.source;
+  }
+  function wireEditor() {
+    var svg = $("edSvg");
+    svg.addEventListener("pointerdown", function (e) {
+      if (!ed.editing) return;
+      var tr = activeTrack();
+      var tgt = e.target;
+      if (tgt && tgt.classList.contains("node")) {
+        var i = +tgt.getAttribute("data-i");
+        if (ed.mode === "delete") {
+          if (tr.nodes.length > 3) { tr.nodes.splice(i, 1); ed.dirty(); }
+          return;
+        }
+        ed.drag = i; svg.setPointerCapture(e.pointerId); return;
+      }
+      var w = svgPointToWorld(e);
+      if (ed.mode === "append") { tr.nodes.push(w); ed.dirty(); }
+      else if (ed.mode === "insert") {
+        // insert at nearest segment
+        var best = 0, bd = 1e18;
+        for (var k = 0; k < tr.nodes.length; k++) {
+          var a = tr.nodes[k], b = tr.nodes[(k + 1) % tr.nodes.length];
+          var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+          var dd = Math.hypot(mx - w[0], my - w[1]);
+          if (dd < bd) { bd = dd; best = k; }
+        }
+        tr.nodes.splice(best + 1, 0, w); ed.dirty();
+      }
+    });
+    svg.addEventListener("pointermove", function (e) {
+      if (!ed.editing || ed.drag < 0) return;
+      var tr = activeTrack();
+      tr.nodes[ed.drag] = svgPointToWorld(e);
+      if (!ed.raf) ed.raf = requestAnimationFrame(function () { ed.raf = 0; drawEditor(); });
+    });
+    svg.addEventListener("pointerup", function (e) {
+      if (ed.drag >= 0) { ed.drag = -1; ed.dirty(); }
+    });
+    ed.dirty = function () { drawEditor(); markStale(); save(); };
+  }
+
+  // ---------- render: vehicle / event forms ----------
+  function buildVehForm() {
+    var host = $("vehGrid"); host.innerHTML = "";
+    VEH_SCHEMA.forEach(function (grp) {
+      var panel = document.createElement("div"); panel.className = "panel";
+      var h = '<header><h2>' + grp[0] + '</h2><span class="sp"></span></header>';
+      var rows = grp[1].map(function (f) {
+        return '<div class="frow"><label>' + f[1] + '</label><input data-k="' + f[0] + '" type="number" step="' + f[3] + '" value="' + S.vehicle[f[0]] + '">' + (f[2] ? '<span class="u">' + f[2] + '</span>' : '') + '</div>';
+      }).join("");
+      panel.innerHTML = h + rows;
+      host.appendChild(panel);
+    });
+    host.querySelectorAll("input[data-k]").forEach(function (inp) {
+      inp.addEventListener("change", function () {
+        var val = parseFloat(inp.value);
+        if (Number.isFinite(val)) { S.vehicle[inp.getAttribute("data-k")] = val; markStale(); save(); renderDerived(); }
+      });
+    });
+    renderDerived();
+  }
+  function renderDerived() {
+    var d = derive(S.vehicle, S.event);
+    var v = S.vehicle;
+    var rows = [
+      ["Total mass (with driver)", fmt(d.m, 1) + " kg"],
+      ["Static front / rear axle", fmt(d.m * g * v.front_frac, 0) + " / " + fmt(d.m * g * (1 - v.front_frac), 0) + " N"],
+      ["Reference wheel load", fmt(d.FzRef, 0) + " N"],
+      ["Downforce @ 30 m/s", fmt(0.5 * d.rho * v.ClA_m2 * 900, 0) + " N"],
+      ["Drag @ 30 m/s", fmt(0.5 * d.rho * v.CdA_m2 * 900, 0) + " N"],
+      ["Terminal speed (power vs drag)", fmt(d.vCap * 3.6, 0) + " km/h"],
+      ["Front / rear effective radius", fmt(d.rEffF * 1000, 1) + " / " + fmt(d.rEffR * 1000, 1) + " mm"],
+      ["Air density (from ambient)", fmt(d.rho, 3) + " kg/m3"]
+    ];
+    $("vehDerived").innerHTML = rows.map(function (r) { return "<span>" + r[0] + "</span><b>" + r[1] + "</b>"; }).join("");
+  }
+  function selectEvent(type) {
+    var tr = presetTrackFor(type);
+    if (tr) S.activeId = tr.id;
+    setEditing(false);
+    applyEventLock(type);
+    $("widthRange").value = activeTrack().halfWidth; $("widthVal").textContent = fmt(activeTrack().halfWidth, 2) + " m";
+    $("closeLoopBtn").setAttribute("aria-pressed", String(!!activeTrack().closed));
+    syncTrackSel(); renderMyTracks(); syncEventForm(); buildEditor(); renderDerived(); markStale(); save();
+  }
+  function wireEventForm() {
+    $("eventPick").querySelectorAll("[data-ev]").forEach(function (b) {
+      b.addEventListener("click", function () { selectEvent(b.getAttribute("data-ev")); });
+    });
+    var map = { ev_driver: "driver_kg", ev_amb: "ambient_C", ev_mu: "mu_scale" };
+    Object.keys(map).forEach(function (id) {
+      $(id).addEventListener("change", function () {
+        var val = parseFloat($(id).value);
+        if (Number.isFinite(val)) { S.event[map[id]] = val; if (S.event.type === "endurance") applyEventLock("endurance"); markStale(); save(); renderDerived(); syncEventForm(); }
+      });
+    });
+    $("forkCourseBtn").addEventListener("click", function () {
+      var p = presetTrackFor(S.event.type);
+      if (p) S.activeId = p.id;
+      forkActiveTrack();
+      go("setup");
+    });
+  }
+  function syncEventForm() {
+    var type = S.event.type, r = FSAE_RULES[type];
+    $("eventPick").querySelectorAll("[data-ev]").forEach(function (x) { x.setAttribute("aria-pressed", String(x.getAttribute("data-ev") === type)); });
+    $("ru_course").textContent = r.course;
+    $("ru_bc").textContent = r.bc;
+    $("ru_timing").textContent = r.timing;
+    $("ru_laps").textContent = type === "endurance" ? (S.event.laps + " x (22 km / lap)") : "1";
+    $("ev_driver").value = S.event.driver_kg; $("ev_amb").value = S.event.ambient_C; $("ev_mu").value = S.event.mu_scale;
+  }
+
+  // ---------- render: run ----------
+  function wireRun() {
+    $("modePick").querySelectorAll("[data-mode]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        $("modePick").querySelectorAll("[data-mode]").forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+        S.solver.mode = b.getAttribute("data-mode");
+        if (S.solver.mode === "quick") { S.solver.ds = 1.2; S.solver.iters = 3; S.solver.passes = 4; }
+        else { S.solver.ds = 0.6; S.solver.iters = 4; S.solver.passes = 6; }
+        syncSolverForm(); save();
+      });
+    });
+    ["sv_ds", "sv_it", "sv_passes"].forEach(function (id) {
+      $(id).addEventListener("change", function () { syncSolverInputs(); save(); });
+    });
+    $("runSolveBtn").addEventListener("click", runSolve);
+  }
+  function syncSolverForm() {
+    $("sv_ds").value = S.solver.ds; $("sv_it").value = S.solver.iters; $("sv_passes").value = S.solver.passes;
+    $("modePick").querySelectorAll("[data-mode]").forEach(function (x) { x.setAttribute("aria-pressed", String(x.getAttribute("data-mode") === S.solver.mode)); });
+  }
+  function syncSolverInputs() {
+    var ds = parseFloat($("sv_ds").value), it = parseInt($("sv_it").value, 10), pa = parseInt($("sv_passes").value, 10);
+    if (Number.isFinite(ds)) S.solver.ds = clamp(ds, 0.3, 5);
+    if (Number.isFinite(it)) S.solver.iters = clamp(it, 1, 10);
+    if (Number.isFinite(pa)) S.solver.passes = clamp(pa, 1, 12);
+  }
+  function renderRunResult() {
+    var chip = $("runResChip");
+    if (!S.result) { chip.textContent = "no solve yet"; chip.className = "chip"; $("runResult").innerHTML = ""; return; }
+    chip.textContent = S.result.method; chip.className = "chip ok";
+    var s = S.result.summary;
+    var rows = [
+      ["Lap time", fmt(s.lapTime, 3) + " s"],
+      ["Top speed", fmt(s.vMaxKmh, 1) + " km/h"],
+      ["Min speed", fmt(s.vMin * 3.6, 1) + " km/h"],
+      ["Peak lateral", fmt(s.aLatMax_g, 2) + " g"],
+      ["Peak accel", fmt(s.aAcc_g, 2) + " g"],
+      ["Peak braking (tyre)", fmt(s.aBrTyre_g, 2) + " g"],
+      ["Peak decel (total)", fmt(Math.abs(s.aBr_g), 2) + " g"],
+      ["Brake energy / lap", fmt(s.brakeEnergy_kJ, 1) + " kJ"],
+      ["Mesh stations", "" + S.result.mesh.N]
+    ];
+    $("runResult").innerHTML = rows.map(function (r) { return "<span>" + r[0] + "</span><b>" + r[1] + "</b>"; }).join("");
+  }
+
+  // ---------- render: results (canvases) ----------
+  function setupCv(cv) {
+    var dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
+    cv.width = Math.max(1, r.width * dpr); cv.height = Math.max(1, r.height * dpr);
+    var ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // clamp: a hidden/collapsed canvas reports 0x0, which sends some layouts (e.g. the g-g
+    // plot's radii) negative and throws mid-draw -- floor at a size nothing tries to draw at.
+    return { ctx: ctx, w: Math.max(r.width, 80), h: Math.max(r.height, 80) };
+  }
+  function cssv(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#888"; }
+  function ramp(f, a, b, c) {
+    f = clamp(f, 0, 1);
+    var o;
+    if (f < 0.5) { var u = f / 0.5; o = [a[0] + u * (b[0] - a[0]), a[1] + u * (b[1] - a[1]), a[2] + u * (b[2] - a[2])]; }
+    else { var w = (f - 0.5) / 0.5; o = [b[0] + w * (c[0] - b[0]), b[1] + w * (c[1] - b[1]), b[2] + w * (c[2] - b[2])]; }
+    return "rgb(" + o.map(Math.round).join(",") + ")";
+  }
+  var C_SPEED = [[30, 95, 165], [59, 150, 90], [150, 200, 70]];
+  var C_LOAD = [[110, 124, 134], [228, 160, 44], [201, 52, 40]];
+  function speedColor(f) { return ramp(f, C_SPEED[0], C_SPEED[1], C_SPEED[2]); }
+  function loadColor(f) { return ramp(f, C_LOAD[0], C_LOAD[1], C_LOAD[2]); }
+  function paintCbar(id, cols) {
+    var el = $(id); if (!el) return;
+    el.style.background = "linear-gradient(90deg," +
+      "rgb(" + cols[0].join(",") + ") 0%,rgb(" + cols[1].join(",") + ") 50%,rgb(" + cols[2].join(",") + ") 100%)";
+  }
+
+  function renderResults() {
+    if (!S.result) {
+      $("resMetrics").innerHTML = '<div class="metric"><div class="k">status</div><div class="v" style="font-size:13px">no solve yet</div></div>';
+      $("dutyTable").innerHTML = ""; $("cornerTable").innerHTML = ""; return;
+    }
+    // The results canvases are 0x0 while this view is hidden (e.g. solving from the Run
+    // page) -- drawing into them sends some of the charts (drawGG especially) negative
+    // canvas dimensions and throws, which used to abort the rest of runSolve() (that's why
+    // the header "lap" readout could get stuck on "needs solve" after a real solve). go()
+    // already repaints this view on arrival, so just skip the paint while hidden.
+    var resView = document.querySelector('.view[data-view="results"]');
+    if (resView && resView.hidden) return;
+    var R = S.result, s = R.summary;
+    var mets = [
+      ["Lap time", fmt(s.lapTime, 3), "s"],
+      ["Distance", fmt(s.distance_m, 0), "m"],
+      ["Top speed", fmt(s.vMaxKmh, 0), "km/h"],
+      ["Avg speed", fmt(s.avgKmh, 0), "km/h"],
+      ["Min speed", fmt(s.vMinKmh, 0), "km/h"],
+      ["Peak lateral", fmt(s.aLatMax_g, 2), "g"],
+      ["Peak accel", fmt(s.aAcc_g, 2), "g"],
+      ["Peak braking (tyre)", fmt(s.aBrTyre_g, 2), "g"],
+      ["Peak decel (total)", fmt(Math.abs(s.aBr_g), 2), "g"],
+      ["Peak drive power", fmt(s.peakPower_kW, 1), "kW"],
+      ["Time cornering", fmt(s.pctCorner * 100, 0), "%"],
+      ["Time braking", fmt(s.pctBrake * 100, 0), "%"],
+      ["Time on power", fmt(s.pctAccel * 100, 0), "%"],
+      ["Brake energy / lap", fmt(s.brakeEnergy_kJ, 1), "kJ"],
+      ["Mesh stations", "" + R.mesh.N, ""]
+    ];
+    if (s.laps > 1) mets.push(
+      ["Laps", "" + s.laps, ""],
+      ["Total time", fmt(s.lapTime * s.laps / 60, 1), "min"],
+      ["Total brake E", fmt(s.brakeEnergy_kJ * s.laps / 1000, 1), "MJ"]
+    );
+    $("resMetrics").innerHTML = mets.map(function (m) {
+      return '<div class="metric"><div class="k">' + m[0] + '</div><div class="v">' + m[1] + (m[2] ? ' <small>' + m[2] + '</small>' : '') + '</div></div>';
+    }).join("");
+
+    paintCbar("cbSpeedG", C_SPEED); paintCbar("cbTraceG", C_SPEED); paintCbar("cbGGG", C_SPEED); paintCbar("cbHistG", C_SPEED); paintCbar("cbLoadG", C_LOAD);
+    $("cbSpeedLo").textContent = fmt(s.vMinKmh, 0); $("cbSpeedHi").textContent = fmt(s.vMaxKmh, 0) + " km/h";
+    $("cbTraceLo").textContent = "0"; $("cbTraceHi").textContent = fmt(s.vMaxKmh, 0) + " km/h";
+    $("cbGGLo").textContent = fmt(s.vMinKmh, 0); $("cbGGHi").textContent = fmt(s.vMaxKmh, 0) + " km/h";
+    $("cbHistLo").textContent = "0"; $("cbHistHi").textContent = fmt(s.vMaxKmh, 0) + " km/h";
+    $("cbLoadHi").textContent = fmt(s.aLatMax_g, 2) + " g";
+    $("lgLat").style.background = loadColor(0.7);
+
+    drawTrackMap("cvLine", function (i) { return (R.v[i] - R.summary.vMin) / ((R.summary.vMax - R.summary.vMin) || 1); }, speedColor);
+    drawTrackMap("cvLoad", function (i) { return Math.abs(R.aLat[i]) / g / (R.summary.aLatMax_g || 1); }, loadColor);
+    drawTrace(); drawG(); drawGG(); drawHist(); drawCorners(); drawDuty();
+  }
+
+  function trackTransform(o, mx, my) {
+    var minx = Math.min.apply(null, mx), maxx = Math.max.apply(null, mx);
+    var miny = Math.min.apply(null, my), maxy = Math.max.apply(null, my);
+    var pad = 16, sc = Math.min((o.w - 2 * pad) / ((maxx - minx) || 1), (o.h - 2 * pad) / ((maxy - miny) || 1));
+    var ox = pad + (o.w - 2 * pad - sc * (maxx - minx)) / 2, oy = pad + (o.h - 2 * pad - sc * (maxy - miny)) / 2;
+    return { X: function (x) { return ox + (x - minx) * sc; }, Y: function (y) { return oy + (y - miny) * sc; } };
+  }
+  function drawTrackMap(cvId, frac, colorFn) {
+    var R = S.result, cv = $(cvId), o = setupCv(cv), ctx = o.ctx;
+    ctx.clearRect(0, 0, o.w, o.h);
+    var mx = R.mesh.x, my = R.mesh.y, N = R.mesh.N, tf = trackTransform(o, mx, my);
+    ctx.lineWidth = 4; ctx.lineCap = "round";
+    for (var i = 0; i < (R.closed ? N : N - 1); i++) {
+      var j = (i + 1) % N;
+      ctx.strokeStyle = colorFn(frac(i));
+      ctx.beginPath(); ctx.moveTo(tf.X(mx[i]), tf.Y(my[i])); ctx.lineTo(tf.X(mx[j]), tf.Y(my[j])); ctx.stroke();
+    }
+    ctx.fillStyle = cssv("--text"); ctx.beginPath(); ctx.arc(tf.X(mx[0]), tf.Y(my[0]), 4, 0, 7); ctx.fill();
+    // corner number markers
+    ctx.font = "10px " + cssv("--mono"); ctx.fillStyle = cssv("--muted"); ctx.textAlign = "center";
+    R.corners.forEach(function (c) { ctx.fillText("T" + c.n, tf.X(mx[c.idx]), tf.Y(my[c.idx]) - 7); });
+    ctx.textAlign = "left";
+  }
+  function drawTrace() {
+    var R = S.result, cv = $("cvTrace"), o = setupCv(cv), ctx = o.ctx;
+    ctx.clearRect(0, 0, o.w, o.h);
+    var N = R.mesh.N, total = R.mesh.s[N - 1] + R.mesh.ds, vmax = R.summary.vMax * 1.08;
+    var vmin = R.summary.vMin, spanv = (R.summary.vMax - vmin) || 1;
+    var pad = { l: 40, r: 8, t: 8, b: 20 };
+    var X = function (s) { return pad.l + s / total * (o.w - pad.l - pad.r); };
+    var Y = function (v) { return o.h - pad.b - v / vmax * (o.h - pad.t - pad.b); };
+    ctx.strokeStyle = cssv("--line"); ctx.lineWidth = 1; ctx.font = "10px " + cssv("--mono"); ctx.fillStyle = cssv("--muted");
+    for (var gk = 0; gk <= 4; gk++) { var vv = vmax * gk / 4, yy = Y(vv); ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(o.w - pad.r, yy); ctx.stroke(); ctx.fillText(fmt(vv * 3.6, 0), 4, yy + 3); }
+    ctx.fillStyle = "rgba(200,60,60,0.16)";
+    for (var b = 0; b < N; b++) if (R.aLong[b] < -0.4 * g) ctx.fillRect(X(R.mesh.s[b]) - 1, pad.t, 2, o.h - pad.t - pad.b);
+    ctx.lineWidth = 2; ctx.lineCap = "round";
+    for (var i = 0; i < N - 1; i++) {
+      ctx.strokeStyle = speedColor((R.v[i] - vmin) / spanv);
+      ctx.beginPath(); ctx.moveTo(X(R.mesh.s[i]), Y(R.v[i])); ctx.lineTo(X(R.mesh.s[i + 1]), Y(R.v[i + 1])); ctx.stroke();
+    }
+    ctx.fillStyle = cssv("--faint"); ctx.fillText("distance (m)  ->", o.w / 2 - 30, o.h - 6);
+  }
+  function drawG() {
+    var R = S.result, cv = $("cvG"), o = setupCv(cv), ctx = o.ctx;
+    ctx.clearRect(0, 0, o.w, o.h);
+    var N = R.mesh.N, total = R.mesh.s[N - 1] + R.mesh.ds;
+    var gmax = Math.max(1.2, R.summary.aLatMax_g, R.summary.aAcc_g, Math.abs(R.summary.aBr_g)) * 1.1;
+    var pad = { l: 40, r: 8, t: 8, b: 20 };
+    var X = function (s) { return pad.l + s / total * (o.w - pad.l - pad.r); };
+    var Y = function (gv) { return pad.t + (gmax - gv) / (2 * gmax) * (o.h - pad.t - pad.b); };
+    ctx.strokeStyle = cssv("--line"); ctx.lineWidth = 1; ctx.font = "10px " + cssv("--mono"); ctx.fillStyle = cssv("--muted");
+    for (var gk = -2; gk <= 2; gk++) { var gv = gmax * gk / 2, yy = Y(gv); ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(o.w - pad.r, yy); ctx.stroke(); ctx.fillText(fmt(gv, 1), 6, yy + 3); }
+    function line(arr, col, sgnAbs) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.beginPath();
+      for (var i = 0; i < N; i++) { var val = (sgnAbs ? Math.abs(arr[i]) : arr[i]) / g; var px = X(R.mesh.s[i]), py = Y(val); i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+      ctx.stroke();
+    }
+    line(R.aLat, loadColor(0.7), true);
+    line(R.aLong, cssv("--accent"), false);
+    ctx.fillStyle = cssv("--faint"); ctx.fillText("g", 6, pad.t + 8);
+  }
+  function drawGG() {
+    var R = S.result, cv = $("cvGG"), o = setupCv(cv), ctx = o.ctx, s = R.summary;
+    ctx.clearRect(0, 0, o.w, o.h);
+    // asymmetric g-g: a race car brakes much harder than it accelerates, so the
+    // origin sits high  -  small accel cap on top, deep braking bowl below.
+    var latMax = Math.max(0.5, s.aLatMax_g), brk = Math.max(0.3, Math.abs(s.aBr_g)), acc = Math.max(0.2, s.aAcc_g);
+    var mg = 30;
+    var pxg = Math.min((o.h - 2 * mg) / (acc + brk), (o.w - 2 * mg) / (2 * latMax)); // equal px/g both axes
+    var ox = o.w / 2, oy = mg + acc * pxg;
+    var GX = function (gl) { return ox + gl * pxg; }, GY = function (gv) { return oy - gv * pxg; };
+    ctx.font = "10px " + cssv("--mono");
+    // reference rings on the combined-g magnitude
+    ctx.strokeStyle = cssv("--line"); ctx.lineWidth = 1;
+    [1, 2, 3].forEach(function (gv) { if (gv <= Math.max(brk, latMax) + 0.6) { ctx.beginPath(); ctx.arc(ox, oy, gv * pxg, 0, 7); ctx.stroke(); } });
+    // axes
+    ctx.strokeStyle = cssv("--border");
+    ctx.beginPath(); ctx.moveTo(mg, oy); ctx.lineTo(o.w - mg, oy); ctx.moveTo(ox, mg * 0.5); ctx.lineTo(ox, o.h - mg * 0.5); ctx.stroke();
+    // friction envelope  -  dashed, asymmetric (upper cap = accel, lower bowl = braking)
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = cssv("--faint"); ctx.lineWidth = 1.3;
+    ctx.beginPath(); ctx.ellipse(ox, oy, latMax * pxg, acc * pxg, 0, Math.PI, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(ox, oy, latMax * pxg, brk * pxg, 0, 0, Math.PI); ctx.stroke();
+    ctx.setLineDash([]);
+    // points
+    var vmin = s.vMin, span = (s.vMax - vmin) || 1;
+    ctx.globalAlpha = 0.82;
+    R.gg.forEach(function (p) {
+      ctx.fillStyle = speedColor((p[2] - vmin) / span);
+      ctx.beginPath(); ctx.arc(GX(clamp(p[0], -latMax * 1.3, latMax * 1.3)), GY(clamp(p[1], -brk * 1.3, acc * 1.3)), 2, 0, 7); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    // labels
+    ctx.fillStyle = cssv("--muted");
+    [-2, -1, 1, 2].forEach(function (gv) { if (Math.abs(gv) <= latMax + 0.6) ctx.fillText(Math.abs(gv) + "g", GX(gv) - 5, oy + 13); });
+    ctx.fillStyle = cssv("--faint");
+    ctx.fillText("accel " + fmt(acc, 1) + " g", ox + 6, GY(acc) + 3);
+    ctx.fillText("brake " + fmt(brk, 1) + " g", ox + 6, GY(-brk) + 2);
+    ctx.fillText("lateral " + fmt(latMax, 1) + " g", GX(-latMax) + 2, oy - 5);
+  }
+  function drawHist() {
+    var R = S.result, cv = $("cvHist"), o = setupCv(cv), ctx = o.ctx;
+    ctx.clearRect(0, 0, o.w, o.h);
+    var N = R.mesh.N, bin = 10, nb = Math.max(1, Math.ceil(R.summary.vMaxKmh / bin));
+    var acc = new Float64Array(nb), tot = 0;
+    for (var i = 0; i < N; i++) { var kmh = R.v[i] * 3.6, bi = Math.min(nb - 1, Math.floor(kmh / bin)); acc[bi] += R.dt[i]; tot += R.dt[i]; }
+    var mx = 0; for (var q = 0; q < nb; q++) mx = Math.max(mx, acc[q] / tot);
+    var pad = { l: 34, r: 8, t: 10, b: 22 };
+    var bw = (o.w - pad.l - pad.r) / nb;
+    ctx.font = "10px " + cssv("--mono"); ctx.fillStyle = cssv("--muted");
+    for (var gk = 0; gk <= 2; gk++) { var fr = mx * gk / 2, yy = o.h - pad.b - fr / (mx || 1) * (o.h - pad.t - pad.b); ctx.strokeStyle = cssv("--line"); ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(o.w - pad.r, yy); ctx.stroke(); ctx.fillText(fmt(fr * 100, 0) + "%", 4, yy + 3); }
+    for (var k = 0; k < nb; k++) {
+      var h = acc[k] / tot / (mx || 1) * (o.h - pad.t - pad.b);
+      ctx.fillStyle = speedColor((k + 0.5) / nb);
+      ctx.fillRect(pad.l + k * bw + 1, o.h - pad.b - h, bw - 2, h);
+      if (k % 2 === 0) { ctx.fillStyle = cssv("--faint"); ctx.fillText("" + (k * bin), pad.l + k * bw, o.h - 8); }
+    }
+    ctx.fillStyle = cssv("--faint"); ctx.fillText("km/h", o.w - pad.r - 24, o.h - 8);
+  }
+  function drawCorners() {
+    var R = S.result;
+    if (!R.corners.length) { $("cornerTable").innerHTML = '<tbody><tr><td>no distinct corners</td></tr></tbody>'; return; }
+    var head = ["Corner", "Dist (m)", "Apex (km/h)", "Radius (m)", "Lat g", "Entry (km/h)", "Brake dist (m)"];
+    var html = "<thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>";
+    R.corners.forEach(function (c) {
+      html += "<tr>" + [
+        "T" + c.n, fmt(c.s, 0), fmt(c.v * 3.6, 1),
+        isFinite(c.R) ? fmt(c.R, 1) : "-", fmt(c.aLat_g, 2),
+        fmt(c.entryV * 3.6, 1), fmt(c.brakeDist, 0)
+      ].map(function (x, k) { return k === 0 ? '<td>' + x + '</td>' : '<td class="n">' + x + '</td>'; }).join("") + "</tr>";
+    });
+    $("cornerTable").innerHTML = html + "</tbody>";
+  }
+  function drawDuty() {
+    var R = S.result, N = R.mesh.N;
+    var iMax = 0; for (var i = 1; i < N; i++) if (R.Pbrake[i] > R.Pbrake[iMax]) iMax = i;
+    var lo = Math.max(0, iMax - 6), hi = Math.min(N, iMax + 9);
+    var head = ["s (m)", "t (s)", "v (m/s)", "a_long (g)", "a_lat (g)", "F_brake (N)", "P_brake (W)", "steer (deg)", "Fz_fl", "Fz_fr", "Fz_rl", "Fz_rr"];
+    var html = "<thead><tr>" + head.map(function (h) { return "<th>" + h + "</th>"; }).join("") + "</tr></thead><tbody>";
+    for (var k = lo; k < hi; k++) {
+      html += "<tr>" + [
+        fmt(R.mesh.s[k], 1), fmt(R.t[k], 3), fmt(R.v[k], 2), fmt(R.aLong[k] / g, 2), fmt(R.aLat[k] / g, 2),
+        fmt(R.Fbrake[k], 0), fmt(R.Pbrake[k], 0), fmt(R.steer[k], 1),
+        fmt(R.Fz.fl[k], 0), fmt(R.Fz.fr[k], 0), fmt(R.Fz.rl[k], 0), fmt(R.Fz.rr[k], 0)
+      ].map(function (c) { return '<td class="n">' + c + "</td>"; }).join("") + "</tr>";
+    }
+    $("dutyTable").innerHTML = html + "</tbody>";
+  }
+
+  // ---------- exports ----------
+  function csv(rows) {
+    return rows.map(function (r) {
+      return r.map(function (c) { return typeof c === "number" ? (Number.isFinite(c) ? "" + round(c, 5) : "") : '"' + String(c).replace(/"/g, '""') + '"'; }).join(",");
+    }).join("\n");
+  }
+  function expGeometry() {
+    var m = (S.result && S.result.mesh) || buildMesh(activeTrack(), S.solver.ds);
+    if (!m) return [["error", "track too short"]];
+    var tr = activeTrack(), rows = [["s_m", "x_m", "y_m", "kappa_1pm", "w_left_m", "w_right_m"]];
+    for (var i = 0; i < m.N; i++) rows.push([m.s[i], m.x[i], m.y[i], m.kappa[i], tr.halfWidth, tr.halfWidth]);
+    return rows;
+  }
+  function expTelemetry() {
+    var R = S.result, m = R.mesh, rows = [["s_m", "t_s", "v_ms", "v_kmh", "a_long_g", "a_lat_g", "steer_deg", "kappa_1pm"]];
+    for (var i = 0; i < m.N; i++) rows.push([m.s[i], R.t[i], R.v[i], R.v[i] * 3.6, R.aLong[i] / g, R.aLat[i] / g, R.steer[i], m.kappa[i]]);
+    return rows;
+  }
+  function expDuty() {
+    var R = S.result, m = R.mesh, rows = [["s_m", "t_s", "v_ms", "a_long_g", "F_brake_N", "P_brake_W", "Fz_fl_N", "Fz_fr_N", "Fz_rl_N", "Fz_rr_N"]];
+    for (var i = 0; i < m.N; i++) rows.push([m.s[i], R.t[i], R.v[i], R.aLong[i] / g, R.Fbrake[i], R.Pbrake[i], R.Fz.fl[i], R.Fz.fr[i], R.Fz.rl[i], R.Fz.rr[i]]);
+    return rows;
+  }
+  function expStructural() {
+    var R = S.result, v = S.vehicle, d = derive(v, S.event), N = R.mesh.N;
+    var rW = v.tire_radius_m, pmu = v.pad_mu > 0 ? v.pad_mu : 0.45;
+    var pr = v.pedal_ratio > 0 ? v.pedal_ratio : 3.4, hr = v.brake_hyd_ratio > 0 ? v.brake_hyd_ratio : 6;
+    var maxFzF = 0, maxFzR = 0, maxFy = 0, maxFbr = 0, maxTracF = 0, sF = 0, sB = 0, sT = 0;
+    for (var i = 0; i < N; i++) {
+      var fzf = Math.max(R.Fz.fl[i], R.Fz.fr[i]), fzr = Math.max(R.Fz.rl[i], R.Fz.rr[i]);
+      if (fzf > maxFzF) { maxFzF = fzf; sF = i; }
+      if (fzr > maxFzR) maxFzR = fzr;
+      var fy = Math.abs(R.aLat[i]) * d.m / 2;
+      if (fy > maxFy) maxFy = fy;
+      if (R.Fbrake[i] > maxFbr) { maxFbr = R.Fbrake[i]; sB = i; }
+      var traF = R.aLong[i] > 0 ? R.aLong[i] * d.m : 0;
+      if (traF > maxTracF) { maxTracF = traF; sT = i; }
+    }
+    var LF = 1.5;
+    // brake: maxFbr = peak total tyre braking force (N). Split by bias, per corner.
+    var TfRotor = maxFbr * v.brake_bias_front * rW / 2;   // front rotor brake torque, N.m
+    var TrRotor = maxFbr * (1 - v.brake_bias_front) * rW / 2;
+    var padF_f = d.rEffF > 0 ? TfRotor / d.rEffF : 0;     // pad friction force per front rotor
+    var padF_r = d.rEffR > 0 ? TrRotor / d.rEffR : 0;
+    var clampTot = 2 * (padF_f / (2 * pmu)) + 2 * (padF_r / (2 * pmu));  // all four calipers
+    var pedalF = clampTot / hr / pr;                       // foot force at the pedal
+    var rows = [["component", "load_case", "station_s_m", "Fx_N", "Fy_N", "Fz_N", "Mx_Nm", "My_Nm", "Mz_Nm", "load_factor"]];
+    rows.push(["front_upright", "peak_vertical", R.mesh.s[sF], "", maxFy, maxFzF, maxFy * rW, "", "", LF]);
+    rows.push(["front_hub_bearing", "peak_vertical", R.mesh.s[sF], "", maxFy, maxFzF, "", "", "", LF]);
+    rows.push(["rear_upright", "peak_vertical", "", maxTracF / 2, maxFy, maxFzR, "", "", "", LF]);
+    rows.push(["front_caliper_mount", "peak_brake_torque", R.mesh.s[sB], padF_f, "", "", "", "", TfRotor, LF]);
+    rows.push(["rear_caliper_mount", "peak_brake_torque", R.mesh.s[sB], padF_r, "", "", "", "", TrRotor, LF]);
+    rows.push(["driveshaft_rear", "peak_traction", R.mesh.s[sT], maxTracF / 2, "", "", "", maxTracF / 2 * rW, "", LF]);
+    rows.push(["brake_pedal", "peak_effort_est", R.mesh.s[sB], pedalF, "", "", "", "", "", LF]);
+    return rows;
+  }
+  function expThermal() {
+    var R = S.result, v = S.vehicle, N = R.mesh.N;
+    var roF = v.rotor_od_front_mm / 2000, riF = roF - v.pad_height_front_mm / 1000;
+    var roR = v.rotor_od_rear_mm / 2000, riR = roR - v.pad_height_rear_mm / 1000;
+    var Af = Math.PI * (roF * roF - riF * riF) * 2, Ar = Math.PI * (roR * roR - riR * riR) * 2;
+    var rows = [["time_s", "front_heat_flux_W_m2", "front_film_coeff_W_m2K", "rear_heat_flux_W_m2", "rear_film_coeff_W_m2K"]];
+    var stride = Math.max(1, Math.round(N / 160));
+    for (var i = 0; i < N; i += stride) {
+      var h = 30 + 4.2 * Math.pow(R.v[i], 0.8);
+      rows.push([R.t[i], R.Pbrake[i] * v.brake_bias_front / Af, h, R.Pbrake[i] * (1 - v.brake_bias_front) / Ar, h]);
+    }
+    return rows;
+  }
+  function expCFD() {
+    var R = S.result, v = S.vehicle, d = derive(v, S.event), N = R.mesh.N;
+    var picks = [];
+    var iTop = 0; for (var i = 1; i < N; i++) if (R.v[i] > R.v[iTop]) iTop = i;
+    picks.push(["max_speed", iTop]);
+    // local minima of v = corners
+    var mins = [];
+    for (var k = 2; k < N - 2; k++) if (R.v[k] <= R.v[k - 2] && R.v[k] <= R.v[k + 2]) mins.push([k, R.v[k]]);
+    mins.sort(function (a, b) { return a[1] - b[1]; });
+    for (var q = 0; q < Math.min(5, mins.length); q++) picks.push(["corner_" + (q + 1), mins[q][0]]);
+    var iBr = 0; for (var b = 1; b < N; b++) if (R.aLong[b] < R.aLong[iBr]) iBr = b;
+    picks.push(["brake_zone", iBr]);
+    var rows = [["case", "V_ms", "V_kmh", "ride_front_mm", "ride_rear_mm", "roll_deg", "yaw_deg", "steer_deg"]];
+    picks.forEach(function (pk) {
+      var i = pk[1], vs = R.v[i], q = 0.5 * d.rho * vs * vs;
+      var Fdo = v.ClA_m2 * q;
+      var rideF = v.ride_height_front_mm - (Fdo * v.aero_balance / 2) / (v.wheelrate_front_Nmm * 1000) * 1000;
+      var rideR = v.ride_height_rear_mm - (Fdo * (1 - v.aero_balance) / 2) / (v.wheelrate_rear_Nmm * 1000) * 1000;
+      var roll = R.aLat[i] / g * v.roll_grad_deg_g;
+      var yaw = clamp(R.aLat[i] / g * 2.2, -8, 8);
+      rows.push([pk[0], vs, vs * 3.6, rideF, rideR, roll, yaw, R.steer[i]]);
+    });
+    return rows;
+  }
+  // Minimal kinematics: time, speed, longitudinal acceleration. Nothing else.
+  function expMotion() {
+    var R = S.result, m = R.mesh;
+    var rows = [["t_s", "v_ms", "v_kmh", "a_long_ms2", "a_long_g"]];
+    for (var i = 0; i < m.N; i++) rows.push([R.t[i], R.v[i], R.v[i] * 3.6, R.aLong[i], R.aLong[i] / g]);
+    return rows;
+  }
+
+  // Everything a brake sizing / thermal model needs: a "#"-commented parameter +
+  // summary header, then a per-station timeseries. Read with pandas comment="#".
+  function expBrake() {
+    var R = S.result, m = R.mesh, v = S.vehicle, ev = S.event, d = derive(v, ev);
+    var N = m.N, bias = v.brake_bias_front, rW = v.tire_radius_m;
+    var reF = d.rEffF, reR = d.rEffR;
+    var roF = v.rotor_od_front_mm / 2000, riF = roF - v.pad_height_front_mm / 1000;
+    var roR = v.rotor_od_rear_mm / 2000, riR = roR - v.pad_height_rear_mm / 1000;
+    var AsF = Math.PI * (roF * roF - riF * riF) * 2;   // swept area, both faces
+    var AsR = Math.PI * (roR * roR - riR * riR) * 2;
+    var pmu = v.pad_mu > 0 ? v.pad_mu : 0.45, pr = v.pedal_ratio > 0 ? v.pedal_ratio : 3.4;
+    var hr = v.brake_hyd_ratio > 0 ? v.brake_hyd_ratio : 6;
+    var mTot = d.m, laps = ev.laps || 1;
+
+    // per-station derived channels
+    var ch = [];
+    var Efr = 0, Err = 0, pkDecel = 0, pkPtot = 0, pkPfr = 0, pkQfr = 0;
+    for (var i = 0; i < N; i++) {
+      var vi = R.v[i], al = R.aLong[i], dt = R.dt[i];
+      var brk = (al < -0.05 * g) || (R.Fbrake[i] > 5);
+      var Ftot = R.Fbrake[i];
+      var FaxF = Ftot * bias, FaxR = Ftot * (1 - bias);
+      var FcF = FaxF / 2, FcR = FaxR / 2;
+      var PrF = FcF * vi, PrR = FcR * vi;                 // heat into one rotor
+      var Ptot = R.Pbrake[i];
+      var TrF = FcF * rW, TrR = FcR * rW;                 // torque one rotor must hold
+      var clF = reF > 0 ? TrF / (2 * pmu * reF) : 0;      // pad clamp force / caliper
+      var clR = reR > 0 ? TrR / (2 * pmu * reR) : 0;
+      var om = rW > 0 ? vi / rW : 0;
+      var rpm = om * 60 / (2 * Math.PI);
+      var qF = AsF > 0 ? PrF / AsF : 0, qR = AsR > 0 ? PrR / AsR : 0;
+      var h = 30 + 4.2 * Math.pow(Math.max(vi, 0), 0.8);
+      var clampTot = 2 * clF + 2 * clR;                    // total pad clamp demand, all calipers
+      var Fped = clampTot / hr / pr;                       // foot force at the pedal (via hydraulic + pedal ratio)
+      Efr += PrF * dt; Err += PrR * dt;
+      pkDecel = Math.min(pkDecel, al);
+      pkPtot = Math.max(pkPtot, Ptot); pkPfr = Math.max(pkPfr, PrF); pkQfr = Math.max(pkQfr, qF);
+      ch.push({
+        s: m.s[i], t: R.t[i], dt: dt, lf: clamp(R.t[i] / R.lapTime, 0, 1),
+        v: vi, brk: brk ? 1 : 0, al: al, mu: Math.abs(al) / g,
+        Ftot: Ftot, FaxF: FaxF, FaxR: FaxR, FcF: FcF, FcR: FcR,
+        Ptot: Ptot, PaxF: FaxF * vi, PaxR: FaxR * vi, PrF: PrF, PrR: PrR,
+        TrF: TrF, TrR: TrR, clF: clF, clR: clR, om: om, rpm: rpm,
+        vsF: om * reF, vsR: om * reR, qF: qF, qR: qR,
+        fl: R.Fz.fl[i], fr: R.Fz.fr[i], rl: R.Fz.rl[i], rr: R.Fz.rr[i], h: h, ped: Fped
+      });
+    }
+    var Etot = Efr * 2 + Err * 2;
+
+    // brake zones: contiguous braking runs (allow a 3-station gap). Counts as a distinct
+    // "zone" only if it reaches >= 0.4 g AND sheds >= 18 km/h -- i.e. a real corner you brake
+    // for, not a trailing-brake brush or trace-jitter blip. (Energy totals cover every blip.)
+    var events = [], run = null, gap = 0;
+    var pushRun = function (r) {
+      if (r && r.peak < -0.40 * g && (ch[Math.max(0, r.i0 - 1)].v - ch[r.i1].v) > 5.0) events.push(r);
+    };
+    for (var k = 0; k < N; k++) {
+      if (ch[k].brk) {
+        if (!run) run = { i0: k, i1: k, peak: 0 };
+        run.i1 = k; gap = 0;
+        if (ch[k].al < run.peak) run.peak = ch[k].al;
+      } else if (run) {
+        if (++gap > 3) { pushRun(run); run = null; }
+      }
+    }
+    pushRun(run);
+    var hardest = null;
+    events.forEach(function (e) {
+      var E = 0, EfrE = 0, pk = 0;
+      for (var j = e.i0; j <= e.i1; j++) { E += ch[j].Ptot * ch[j].dt; EfrE += ch[j].PrF * ch[j].dt; pk = Math.min(pk, ch[j].al); }
+      e.E = E; e.EfrE = EfrE; e.pk = pk;
+      e.vin = ch[Math.max(0, e.i0 - 1)].v; e.vout = ch[e.i1].v;
+      e.dist = ch[e.i1].s - ch[e.i0].s; e.dur = ch[e.i1].t - ch[e.i0].t;
+      e.mean = e.dur > 0 ? (e.vin - e.vout) / e.dur : 0;
+      if (!hardest || E > hardest.E) hardest = e;
+    });
+
+    var iso = new Date().toISOString(), tr = activeTrack();
+    var H = [];
+    var P = function (s) { H.push("# " + s); };
+    P("SDM Lap Optimizer v1 -- brake model export");
+    P("generated: " + iso);
+    P("track: " + tr.name + " (" + (tr.closed ? "closed" : "open") + ")   event: " + ev.type + "   laps: " + laps);
+    P("solver: " + R.method + "   mesh N=" + N + "   ds=" + fmt(m.ds, 2) + " m   lap_time_s: " + fmt(R.lapTime, 3));
+    P("units: SI (N, m, s, W, K).  a_long negative = braking.  per-corner heat power = F_corner * v.");
+    P("read in pandas:  pd.read_csv('brake_model.csv', comment='#')");
+    P("--- vehicle ---");
+    P("mass_total_kg: " + fmt(mTot, 2) + "   (chassis " + fmt(v.mass_kg, 2) + " + driver " + fmt(ev.driver_kg || 0, 1) + ")");
+    P("front_static_frac: " + fmt(v.front_frac, 3) + "   cg_height_m: " + fmt(v.cg_height_m, 4) +
+      "   wheelbase_m: " + fmt(v.wheelbase_m, 3) + "   track_m: " + fmt(v.track_m, 3));
+    P("tire_rolling_radius_m: " + fmt(rW, 4) + "   mu0: " + fmt(v.mu0, 2) + "   mu_scale: " + fmt(ev.mu_scale || 1, 2));
+    P("--- brake system ---");
+    P("brake_bias_front: " + fmt(bias, 3));
+    P("rotor_od_front_mm: " + fmt(v.rotor_od_front_mm, 1) + "   rotor_od_rear_mm: " + fmt(v.rotor_od_rear_mm, 1));
+    P("pad_height_front_mm: " + fmt(v.pad_height_front_mm, 1) + "   pad_height_rear_mm: " + fmt(v.pad_height_rear_mm, 1) + "   pad_mu: " + fmt(pmu, 2));
+    P("r_eff_front_m: " + fmt(reF, 4) + "   r_eff_rear_m: " + fmt(reR, 4));
+    P("swept_area_front_m2: " + fmt(AsF, 5) + "   swept_area_rear_m2: " + fmt(AsR, 5) + "   (sum of both rotor faces)");
+    P("pedal_ratio: " + fmt(pr, 2) + "   hydraulic_ratio_caliper_over_MC: " + fmt(hr, 2));
+    P("--- ambient ---");
+    P("ambient_C: " + fmt(ev.ambient_C == null ? 25 : ev.ambient_C, 1) + "   air_density_kg_m3: " + fmt(d.rho, 3));
+    P("--- per-lap braking (this solve) ---");
+    P("n_brake_zones: " + events.length + "   (distinct >=0.4 g / >=18 km/h zones; energy totals below cover all braking)");
+    P("brake_energy_total_kJ_per_lap: " + fmt(Etot / 1000, 1));
+    P("brake_energy_front_axle_kJ: " + fmt(Efr * 2 / 1000, 1) + "   rear_axle_kJ: " + fmt(Err * 2 / 1000, 1));
+    P("brake_energy_per_front_rotor_kJ: " + fmt(Efr / 1000, 1) + "   per_rear_rotor_kJ: " + fmt(Err / 1000, 1));
+    P("peak_decel_g_total: " + fmt(-pkDecel / g, 2) + "   (incl. aero drag)   peak_decel_g_tyre: " + fmt(R.summary.aBrTyre_g, 2) + "   (brake sizing case)");
+    P("peak_total_brake_power_kW: " + fmt(pkPtot / 1000, 1));
+    P("peak_per_front_rotor_power_kW: " + fmt(pkPfr / 1000, 1) + "   peak_per_front_rotor_heat_flux_MW_m2: " + fmt(pkQfr / 1e6, 2));
+    if (hardest) {
+      P("--- hardest single stop ---");
+      P("entry_s_m: " + fmt(ch[hardest.i0].s, 1) + "   v_in_kmh: " + fmt(hardest.vin * 3.6, 1) + "   v_out_kmh: " + fmt(hardest.vout * 3.6, 1));
+      P("distance_m: " + fmt(hardest.dist, 1) + "   duration_s: " + fmt(hardest.dur, 2));
+      P("mean_decel_g: " + fmt(hardest.mean / g, 2) + "   peak_decel_g: " + fmt(-hardest.pk / g, 2));
+      P("energy_total_kJ: " + fmt(hardest.E / 1000, 1) +
+        "   energy_per_front_rotor_kJ: " + fmt(hardest.EfrE / 1000, 1));
+    }
+    P("--- full event (" + laps + " laps) ---");
+    P("total_brake_energy_MJ: " + fmt(Etot * laps / 1e6, 2) +
+      "   per_front_rotor_MJ: " + fmt(Efr * laps / 1e6, 2) + "   per_rear_rotor_MJ: " + fmt(Err * laps / 1e6, 2));
+    P("--- columns ---");
+
+    var head = ["s_m", "t_s", "dt_s", "lap_frac", "v_ms", "v_kmh", "braking", "a_long_ms2", "a_long_g", "mu_long_demand",
+      "F_brake_total_N", "F_brake_front_axle_N", "F_brake_rear_axle_N", "F_brake_corner_front_N", "F_brake_corner_rear_N",
+      "P_brake_total_W", "P_brake_front_axle_W", "P_brake_rear_axle_W", "P_front_rotor_W", "P_rear_rotor_W",
+      "T_brake_front_rotor_Nm", "T_brake_rear_rotor_Nm", "F_pad_clamp_front_N", "F_pad_clamp_rear_N",
+      "wheel_omega_rad_s", "rotor_rpm", "v_slide_front_ms", "v_slide_rear_ms",
+      "q_front_rotor_W_m2", "q_rear_rotor_W_m2", "Fz_FL_N", "Fz_FR_N", "Fz_RL_N", "Fz_RR_N",
+      "h_conv_W_m2K", "pedal_force_est_N"];
+    var rows = [head];
+    ch.forEach(function (c) {
+      rows.push([c.s, c.t, c.dt, c.lf, c.v, c.v * 3.6, c.brk, c.al, c.al / g, c.mu,
+        c.Ftot, c.FaxF, c.FaxR, c.FcF, c.FcR, c.Ptot, c.PaxF, c.PaxR, c.PrF, c.PrR,
+        c.TrF, c.TrR, c.clF, c.clR, c.om, c.rpm, c.vsF, c.vsR, c.qF, c.qR,
+        c.fl, c.fr, c.rl, c.rr, c.h, c.ped]);
+    });
+    return H.join("\n") + "\n" + csv(rows);
+  }
+
+  function expManifest() {
+    var R = S.result, tr = activeTrack();
+    return "SDM Lap Optimizer v1  -  export manifest\n" +
+      "generated: " + new Date().toISOString() + "\n" +
+      "track: " + tr.name + "  (" + (tr.closed ? "closed" : "open") + ", source " + (tr.source || "manual") + ")\n" +
+      "event: " + S.event.type + "  laps: " + (S.event.laps || 1) + "  driver: " + S.event.driver_kg + " kg  mu_scale: " + S.event.mu_scale + "\n" +
+      "solver: " + R.method + "  mesh N=" + R.mesh.N + "  ds=" + fmt(R.mesh.ds, 2) + " m\n" +
+      "lap_time_s: " + fmt(R.lapTime, 3) + "\n" +
+      "top_speed_kmh: " + fmt(R.summary.vMaxKmh, 1) + "\n" +
+      "peak_lat_g: " + fmt(R.summary.aLatMax_g, 2) + "   peak_accel_g: " + fmt(R.summary.aAcc_g, 2) + "\n" +
+      "peak_braking_g_tyre: " + fmt(R.summary.aBrTyre_g, 2) + "   peak_decel_g_total: " + fmt(Math.abs(R.summary.aBr_g), 2) + "  (total incl. aero drag)\n" +
+      "brake_energy_kJ_per_lap: " + fmt(R.summary.brakeEnergy_kJ, 1) + "\n" +
+      "grip model: mu0 " + fmt(S.vehicle.mu0, 2) + " at ref load, load-sensitivity k " + fmt(S.vehicle.mu_load_sens, 2) +
+        ", grip utilisation " + fmt(S.vehicle.grip_factor, 2) + ", per-axle load-transfer degradation on.\n" +
+      "units: SI (N, m, s, K, W).  vehicle axes: ISO 8855.  a_long +ve = acceleration.\n" +
+      "NOTE: QSS solve -- no transient/tyre-thermal/driver effects, so lap time is optimistic by\n" +
+      "~5-12%. Structural / thermal / CFD tables are first-order estimates for sizing screens and\n" +
+      "CFD case selection only, not validated loads.";
+  }
+  var EXP = {
+    motion: { name: "motion.csv", fn: function () { return csv(expMotion()); }, needsResult: true },
+    telemetry: { name: "telemetry.csv", fn: function () { return csv(expTelemetry()); }, needsResult: true },
+    brake: { name: "brake_model.csv", fn: expBrake, needsResult: true },
+    geometry: { name: "track_geometry.csv", fn: function () { return csv(expGeometry()); }, needsResult: false },
+    duty: { name: "brake_duty_cycle.csv", fn: function () { return csv(expDuty()); }, needsResult: true },
+    structural: { name: "structural_load_cases.csv", fn: function () { return csv(expStructural()); }, needsResult: true },
+    thermal: { name: "transient_thermal_table.csv", fn: function () { return csv(expThermal()); }, needsResult: true },
+    cfd: { name: "cfd_operating_points.csv", fn: function () { return csv(expCFD()); }, needsResult: true },
+    manifest: { name: "manifest.txt", fn: expManifest, needsResult: true }
+  };
+  function genExp(key) {
+    var e = EXP[key];
+    if (!e) return null;
+    if (e.needsResult && !S.result) return null;
+    return { name: e.name, text: e.fn() };
+  }
+  function downloadBlob(filename, blob) {
+    try {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = filename; a.style.display = "none";
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { a.remove(); URL.revokeObjectURL(url); }, 1000);
+      toast("downloaded " + filename);
+      return true;
+    } catch (e) { toast("download blocked -- use Copy"); return false; }
+  }
+  function downloadText(filename, text, mime) {
+    return downloadBlob(filename, new Blob([text], { type: (mime || "text/csv") + ";charset=utf-8" }));
+  }
+  // minimal STORE-method zip so "Download all" is one file, no multi-download prompt
+  function crc32(bytes) {
+    var c, tbl = crc32._t;
+    if (!tbl) {
+      tbl = crc32._t = [];
+      for (var n = 0; n < 256; n++) { c = n; for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); tbl[n] = c >>> 0; }
+    }
+    c = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) c = tbl[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function makeZip(files) {
+    var enc = new TextEncoder(), parts = [], central = [], offset = 0;
+    var u16 = function (n) { return [n & 255, (n >>> 8) & 255]; };
+    var u32 = function (n) { return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]; };
+    files.forEach(function (f) {
+      var nameB = enc.encode(f.name), dataB = enc.encode(f.text), crc = crc32(dataB);
+      var lh = [].concat(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(dataB.length), u32(dataB.length), u16(nameB.length), u16(0));
+      parts.push(new Uint8Array(lh), nameB, dataB);
+      var ch = [].concat(u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(dataB.length), u32(dataB.length), u16(nameB.length),
+        u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset));
+      central.push(new Uint8Array(ch), nameB);
+      offset += lh.length + nameB.length + dataB.length;
+    });
+    var cdSize = 0; central.forEach(function (p) { cdSize += p.length; });
+    var eocd = [].concat(u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
+      u32(cdSize), u32(offset), u16(0));
+    return new Blob(parts.concat(central, [new Uint8Array(eocd)]), { type: "application/zip" });
+  }
+  var currentExp = null;
+  function wireExport() {
+    document.querySelectorAll("[data-exp]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var key = b.getAttribute("data-exp");
+        var r = genExp(key);
+        if (!r) { toast("solve a lap first"); return; }
+        $("expOut").value = r.text;
+        $("expName").textContent = r.name;
+        currentExp = key;
+      });
+    });
+    $("dlExpBtn").addEventListener("click", function () {
+      var r = genExp(currentExp);
+      if (!r) { toast(currentExp ? "solve a lap first" : "pick an export first"); return; }
+      downloadText(r.name, r.text, r.name.slice(-4) === ".txt" ? "text/plain" : "text/csv");
+    });
+    $("dlAllBtn").addEventListener("click", function () {
+      var files = [];
+      Object.keys(EXP).forEach(function (k) { var r = genExp(k); if (r) files.push(r); });
+      if (!files.length) { toast("solve a lap first"); return; }
+      var tr = activeTrack();
+      downloadBlob("sdm_export_" + (tr.name || "track") + "_" + S.event.type + ".zip", makeZip(files));
+    });
+    $("copyExpBtn").addEventListener("click", function () {
+      var txt = $("expOut").value; if (!txt) return;
+      if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { toast("copied"); }, function () { fallbackCopy(); });
+      else fallbackCopy();
+      function fallbackCopy() { $("expOut").select(); try { document.execCommand("copy"); toast("copied"); } catch (e) { toast("select + copy manually"); } }
+    });
+  }
+
+  // ---------- importers ----------
+  function readFile(input, cb) {
+    var f = input.files && input.files[0];
+    if (!f) { toast("choose a file"); return; }
+    var fr = new FileReader();
+    fr.onload = function () { cb(String(fr.result)); };
+    fr.readAsText(f);
+  }
+  function addTrack(tr) {
+    tr.id = uid();
+    S.tracks.push(tr);
+    syncTrackSel(); renderMyTracks();
+    selectTrack(tr.id);
+    go("setup");
+    toast("added " + tr.name + (tr.source === "user" ? "" : "  -  read-only; Edit to fork"));
+  }
+  function selectTrack(id) {
+    if (S.tracks.filter(function (t) { return t.id === id; })[0]) S.activeId = id;
+    var t = activeTrack();
+    setEditing(false);
+    $("widthRange").value = t.halfWidth; $("widthVal").textContent = fmt(t.halfWidth, 2) + " m";
+    $("closeLoopBtn").setAttribute("aria-pressed", String(!!t.closed));
+    var evType = t.presetFor || t.defaultEvent;
+    if (evType && FSAE_RULES[evType]) { applyEventLock(evType); }
+    syncEventForm(); syncTrackSel(); renderMyTracks();
+    ed.view = null; drawEditor();
+    markStale(); save();
+  }
+  function forkActiveTrack() {
+    var t = activeTrack();
+    var copy = {
+      id: uid(), name: t.name + " - copy", nodes: t.nodes.map(function (p) { return p.slice(); }),
+      closed: t.closed, halfWidth: t.halfWidth, source: "user",
+      origin: t.source === "user" ? (t.origin || "user") : t.source,
+      defaultEvent: t.presetFor || t.defaultEvent || "autocross"
+    };
+    S.tracks.push(copy); S.activeId = copy.id;
+    syncTrackSel(); renderMyTracks();
+    $("widthRange").value = copy.halfWidth; $("widthVal").textContent = fmt(copy.halfWidth, 2) + " m";
+    $("closeLoopBtn").setAttribute("aria-pressed", String(!!copy.closed));
+    ed.view = null; setEditing(true); markStale(); save();
+    toast("editing a copy: " + copy.name);
+  }
+  function deleteTrack(id) {
+    var t = S.tracks.filter(function (x) { return x.id === id; })[0];
+    if (!t || t.presetFor) { toast("FSAE presets can't be deleted"); return; }
+    S.tracks = S.tracks.filter(function (x) { return x.id !== id; });
+    if (S.activeId === id) { selectTrack(presetTrackFor("endurance").id); }
+    else { syncTrackSel(); renderMyTracks(); save(); }
+    toast("deleted " + t.name);
+  }
+  function renderMyTracks() {
+    var host = $("myTracksList");
+    // anything that isn't one of the 4 locked FSAE presets: user forks AND raw imports
+    // (imports stay read-only for direct editing -- see isEditable() -- but are deletable)
+    var mine = S.tracks.filter(function (t) { return !t.presetFor; });
+    if (!mine.length) { host.innerHTML = '<li style="color:var(--faint)">none yet</li>'; return; }
+    host.innerHTML = mine.map(function (t) {
+      var on = t.id === S.activeId ? " on" : "";
+      var tag = t.source === "user" ? "" : ' <span class="s">(' + t.source + ', read-only)</span>';
+      return '<li><button class="linklike' + on + '" data-sel="' + t.id + '">' + t.name + '</button>' + tag +
+        '<span class="s"><button class="linklike del" data-del="' + t.id + '">delete</button></span></li>';
+    }).join("");
+    host.querySelectorAll("[data-sel]").forEach(function (b) { b.addEventListener("click", function () { selectTrack(b.getAttribute("data-sel")); }); });
+    host.querySelectorAll("[data-del]").forEach(function (b) { b.addEventListener("click", function () { deleteTrack(b.getAttribute("data-del")); }); });
+  }
+  function parseOptimumLap(text) {
+    var lines = text.split(/\r?\n/).map(function (l) { return l.split(","); });
+    var hi = -1;
+    for (var i = 0; i < lines.length; i++) {
+      var row = lines[i].map(function (c) { return c.trim(); });
+      if (row[0] === "speed" && row.indexOf("elapsedDistance") >= 0) { hi = i; break; }
+    }
+    if (hi < 0) throw new Error("no channel header (speed / elapsedDistance) found");
+    var hdr = lines[hi].map(function (c) { return c.trim(); });
+    var col = {}; hdr.forEach(function (h, k) { col[h] = k; });
+    var S2 = [], KR = [], XX = [], YY = [], haveXY = ("xposition" in col && "yposition" in col);
+    for (var r = hi + 1; r < lines.length; r++) {
+      var row2 = lines[r];
+      if (!row2 || row2.length <= col["cornerRadius"]) continue;
+      var s = parseFloat(row2[col["elapsedDistance"]]);
+      if (!Number.isFinite(s)) continue;
+      var cr = parseFloat(row2[col["cornerRadius"]]);
+      S2.push(s);
+      KR.push(Number.isFinite(cr) && Math.abs(cr) > 1e-6 ? 1 / cr : 0);
+      if (haveXY) { XX.push(parseFloat(row2[col["xposition"]]) || 0); YY.push(parseFloat(row2[col["yposition"]]) || 0); }
+    }
+    if (S2.length < 5) throw new Error("too few data rows");
+    var nodes;
+    if (haveXY && Math.hypot(XX[XX.length - 1] - XX[0], YY[YY.length - 1] - YY[0]) < (S2[S2.length - 1] * 0.05)) {
+      nodes = decimateXY(XX, YY, 70);
+    } else {
+      // integrate heading from curvature
+      var theta = 0, x = 0, y = 0, px = [0], py = [0];
+      for (var q = 1; q < S2.length; q++) {
+        var dsq = S2[q] - S2[q - 1];
+        theta += KR[q] * dsq; x += Math.cos(theta) * dsq; y += Math.sin(theta) * dsq;
+        px.push(x); py.push(y);
+      }
+      nodes = decimateXY(px, py, 70);
+    }
+    var closed = Math.hypot(nodes[0][0] - nodes[nodes.length - 1][0], nodes[0][1] - nodes[nodes.length - 1][1]) < S2[S2.length - 1] * 0.06;
+    if (closed) nodes.pop();
+    return { name: "optimumlap_" + (S.tracks.length + 1), nodes: nodes, closed: closed, halfWidth: 1.5, source: "optimumlap", defaultEvent: closed ? "endurance" : "autocross" };
+  }
+  function decimateXY(xs, ys, target) {
+    var n = xs.length, cum = [0];
+    for (var i = 1; i < n; i++) cum.push(cum[i - 1] + Math.hypot(xs[i] - xs[i - 1], ys[i] - ys[i - 1]));
+    var total = cum[n - 1], out = [], step = total / target, j = 0;
+    for (var k = 0; k <= target; k++) {
+      var tgt = k * step;
+      while (j < n - 2 && cum[j + 1] < tgt) j++;
+      var seg = (cum[j + 1] - cum[j]) || 1e-9, f = (tgt - cum[j]) / seg;
+      out.push([xs[j] + f * (xs[j + 1] - xs[j]), ys[j] + f * (ys[j + 1] - ys[j])]);
+    }
+    return out;
+  }
+  function parseCones(text) {
+    var rows = text.split(/\r?\n/).filter(function (l) { return l.trim(); }).map(function (l) { return l.split(","); });
+    var start = 0;
+    if (isNaN(parseFloat(rows[0][0]))) start = 1;
+    var L = [], Rr = [];
+    for (var i = start; i < rows.length; i++) {
+      var x = parseFloat(rows[i][0]), y = parseFloat(rows[i][1]), sd = (rows[i][2] || "").trim().toLowerCase();
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      var isLeft = sd === "l" || sd === "left" || sd === "0" || sd === "blue";
+      (isLeft ? L : Rr).push([x, y]);
+    }
+    if (L.length < 2 || Rr.length < 2) throw new Error("need >=2 cones per side (columns x,y,side)");
+    var n = Math.min(L.length, Rr.length), mid = [];
+    for (var k = 0; k < n; k++) mid.push([(L[k][0] + Rr[k][0]) / 2, (L[k][1] + Rr[k][1]) / 2]);
+    var closed = Math.hypot(mid[0][0] - mid[n - 1][0], mid[0][1] - mid[n - 1][1]) < 5;
+    return { name: "cones_" + (S.tracks.length + 1), nodes: mid, closed: closed, halfWidth: 1.5, source: "cones", defaultEvent: closed ? "autocross" : "autocross" };
+  }
+  function parseGPS(text) {
+    var pts = [];
+    if (/<gpx|<trkpt/i.test(text)) {
+      var re = /<trkpt[^>]*lat="([-\d.]+)"[^>]*lon="([-\d.]+)"|<trkpt[^>]*lon="([-\d.]+)"[^>]*lat="([-\d.]+)"/gi, mm;
+      while ((mm = re.exec(text))) {
+        var lat = parseFloat(mm[1] || mm[4]), lon = parseFloat(mm[2] || mm[3]);
+        if (Number.isFinite(lat) && Number.isFinite(lon)) pts.push([lat, lon]);
+      }
+    } else {
+      var rows = text.split(/\r?\n/).filter(function (l) { return l.trim(); }).map(function (l) { return l.split(","); });
+      var s0 = isNaN(parseFloat(rows[0][0])) ? 1 : 0;
+      for (var i = s0; i < rows.length; i++) {
+        var a = parseFloat(rows[i][0]), b = parseFloat(rows[i][1]);
+        if (Number.isFinite(a) && Number.isFinite(b)) pts.push([a, b]);
+      }
+    }
+    if (pts.length < 4) throw new Error("no coordinates found");
+    var latlon = Math.abs(pts[0][0]) <= 90 && Math.abs(pts[0][1]) <= 180 && Math.abs(pts[0][0]) > 0.001;
+    var xy = [];
+    if (latlon) {
+      var lat0 = pts.reduce(function (a, p) { return a + p[0]; }, 0) / pts.length;
+      var lon0 = pts.reduce(function (a, p) { return a + p[1]; }, 0) / pts.length;
+      var mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat0 * Math.PI / 180);
+      xy = pts.map(function (p) { return [(p[1] - lon0) * mPerDegLon, (p[0] - lat0) * mPerDegLat]; });
+    } else xy = pts.map(function (p) { return [p[0], p[1]]; });
+    var nodes = decimateXY(xy.map(function (p) { return p[0]; }), xy.map(function (p) { return p[1]; }), 80);
+    var closed = Math.hypot(nodes[0][0] - nodes[nodes.length - 1][0], nodes[0][1] - nodes[nodes.length - 1][1]) < 15;
+    if (closed) nodes.pop();
+    return { name: "gps_" + (S.tracks.length + 1), nodes: nodes, closed: closed, halfWidth: 1.75, source: "gps", defaultEvent: closed ? "autocross" : "autocross" };
+  }
+  function wireImports() {
+    $("newBlankBtn").addEventListener("click", function () {
+      var nm = ($("newName").value || "my_track").trim();
+      var tr = { id: uid(), name: nm, nodes: [[0, 0], [30, 0], [30, 30], [0, 30]], closed: true, halfWidth: 1.5, source: "user", defaultEvent: "autocross" };
+      S.tracks.push(tr); S.activeId = tr.id;
+      syncTrackSel(); renderMyTracks();
+      $("widthRange").value = 1.5; $("widthVal").textContent = "1.50 m";
+      $("closeLoopBtn").setAttribute("aria-pressed", "true");
+      ed.view = null; setEditing(true); ed.mode = "append"; syncModeTools();
+      markStale(); save(); go("setup");
+      toast("draw with 'Add pt', drag nodes to shape");
+    });
+    $("olImportBtn").addEventListener("click", function () {
+      try {
+        var txt = $("olPaste").value.trim();
+        if (txt) return addTrack(parseOptimumLap(txt));
+        readFile($("olFile"), function (t) { try { addTrack(parseOptimumLap(t)); } catch (e) { toast(e.message); } });
+      } catch (e) { toast(e.message); }
+    });
+    $("coneImportBtn").addEventListener("click", function () {
+      try {
+        var txt = $("conePaste").value.trim();
+        if (txt) return addTrack(parseCones(txt));
+        readFile($("coneFile"), function (t) { try { addTrack(parseCones(t)); } catch (e) { toast(e.message); } });
+      } catch (e) { toast(e.message); }
+    });
+    $("gpsImportBtn").addEventListener("click", function () {
+      readFile($("gpsFile"), function (t) { try { addTrack(parseGPS(t)); } catch (e) { toast(e.message); } });
+    });
+  }
+
+  // ---------- track select / meta ----------
+  function syncTrackSel() {
+    var sel = $("trackSel"); sel.innerHTML = "";
+    S.tracks.forEach(function (t) {
+      var o = document.createElement("option"); o.value = t.id; o.textContent = t.name + (t.closed ? "" : " (open)");
+      sel.appendChild(o);
+    });
+    sel.value = S.activeId;
+  }
+  function buildEditor() { ed.view = null; drawEditor(); }
+  function wireMeta() {
+    $("trackSel").addEventListener("change", function () { selectTrack($("trackSel").value); });
+    $("editTrackBtn").addEventListener("click", function () {
+      if (isEditable(activeTrack())) setEditing(true);
+      else forkActiveTrack();
+    });
+    $("doneEditBtn").addEventListener("click", function () { setEditing(false); save(); });
+    $("renameBtn").addEventListener("click", function () {
+      if (!isEditable(activeTrack())) { toast("fork it first"); return; }
+      var nm = prompt("Track name", activeTrack().name);
+      if (nm) { activeTrack().name = nm.trim(); syncTrackSel(); renderMyTracks(); save(); }
+    });
+    $("delTrackBtn").addEventListener("click", function () { deleteTrack(S.activeId); });
+    $("closeLoopBtn").addEventListener("click", function () {
+      var t = activeTrack(); t.closed = !t.closed;
+      $("closeLoopBtn").setAttribute("aria-pressed", String(t.closed));
+      buildEditor(); markStale(); save();
+    });
+    $("fitBtn").addEventListener("click", fitView);
+    $("widthRange").addEventListener("input", function () {
+      activeTrack().halfWidth = +$("widthRange").value;
+      $("widthVal").textContent = fmt(activeTrack().halfWidth, 2) + " m";
+      drawEditor(); markStale();
+    });
+    $("widthRange").addEventListener("change", save);
+    $("dsRange").addEventListener("input", function () { $("dsVal").textContent = fmt(+$("dsRange").value, 1) + " m"; drawEditor(); });
+    $("modeTools").querySelectorAll("[data-mode]").forEach(function (b) {
+      b.addEventListener("click", function () { ed.mode = b.getAttribute("data-mode"); syncModeTools(); });
+    });
+  }
+  function syncModeTools() {
+    $("modeTools").querySelectorAll("[data-mode]").forEach(function (x) { x.setAttribute("aria-pressed", String(x.getAttribute("data-mode") === ed.mode)); });
+  }
+
+  // ---------- router ----------
+  function go(name) {
+    document.querySelectorAll(".view").forEach(function (v) { v.hidden = v.dataset.view !== name; });
+    document.querySelectorAll(".navitem").forEach(function (b) { b.setAttribute("aria-current", String(b.dataset.v === name)); });
+    $("stage").scrollTop = 0;
+    try { history.replaceState(null, "", "#" + name); } catch (e) {}
+    if (name === "setup") { requestAnimationFrame(function () { if (!ed.view) fitView(); else drawEditor(); }); }
+    if (name === "run") { syncSolverForm(); renderRunResult(); }
+    if (name === "results") { requestAnimationFrame(renderResults); }
+  }
+
+  // ---------- status bar ----------
+  function renderStatus() {
+    var t = activeTrack(), m = buildMesh(t, +$("dsRange").value || S.solver.ds);
+    $("statusbar").innerHTML =
+      "<span>track <b>" + t.name + "</b></span>" +
+      "<span>len <b>" + (m ? fmt(m.total, 0) + " m" : "--") + "</b></span>" +
+      "<span>event <b>" + S.event.type + "</b></span>" +
+      "<span>mass <b>" + fmt(S.vehicle.mass_kg + S.event.driver_kg, 0) + " kg</b></span>" +
+      "<span>solver <b>" + S.solver.mode + "</b></span>" +
+      "<span>lap <b>" + (S.result ? fmt(S.result.lapTime, 3) + " s" : "needs solve") + "</b></span>";
+  }
+  var _save = save; save = function () { _save(); renderStatus(); };
+
+  // ---------- init ----------
+  function init() {
+    if (!load() || !S.tracks.length) seedTracks();
+    if (activeTrack() && activeTrack().presetFor) applyEventLock(activeTrack().presetFor);
+    // forms
+    buildVehForm();
+    wireEventForm(); syncEventForm();
+    wireRun(); syncSolverForm();
+    wireExport(); wireImports(); wireMeta(); wireEditor();
+    syncTrackSel(); renderMyTracks();
+    $("widthRange").value = activeTrack().halfWidth;
+    $("widthVal").textContent = fmt(activeTrack().halfWidth, 2) + " m";
+    $("dsVal").textContent = fmt(+$("dsRange").value, 1) + " m";
+    $("closeLoopBtn").setAttribute("aria-pressed", String(!!activeTrack().closed));
+    syncModeTools(); setEditing(false);
+
+    document.querySelectorAll(".navitem").forEach(function (b) { b.addEventListener("click", function () { go(b.dataset.v); }); });
+    $("solveBtn").addEventListener("click", runSolve);
+    $("themeBtn").addEventListener("click", function () {
+      var root = document.documentElement, cur = root.getAttribute("data-theme");
+      var md = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var dark = cur ? cur === "dark" : md;
+      root.setAttribute("data-theme", dark ? "light" : "dark");
+      if (S.result) renderResults();
+    });
+    var rzT;
+    window.addEventListener("resize", function () {
+      clearTimeout(rzT);
+      rzT = setTimeout(function () {
+        if (!$("edSvg").closest("[hidden]")) fitView();
+        if (S.result && !$("cvLine").closest("[hidden]")) renderResults();
+      }, 120);
+    });
+
+    refreshLap(); renderStatus(); renderRunResult(); renderResults();
+    var initial = (location.hash || "#setup").slice(1);
+    if (["setup", "run", "results", "export"].indexOf(initial) < 0) initial = "setup";
+    go(initial);
+    // auto-solve once so Results isn't empty
+    setTimeout(runSolve, 60);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
+})();
+</script>

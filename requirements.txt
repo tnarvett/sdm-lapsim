@@ -1,0 +1,5 @@
+# Desktop-app packaging only. The app itself (lapsim.html) is plain
+# JS/HTML/CSS and needs nothing -- these are only for `python app.py`
+# and `python build.py`.
+pywebview>=5.0
+pyinstaller>=6.0
