@@ -27,6 +27,19 @@ exact behavior is a well-known false-positive trigger for antivirus/Windows
 Defender/browser download-protection heuristics. The unzipped-folder form
 (same app, same code) doesn't trip it.
 
+**If it won't launch after downloading** (fails immediately, no window):
+this is fixed as of the build in the latest Release -- `app.py` strips
+Windows' "Mark of the Web" tag from its own files on startup, which used to
+make a freshly-downloaded build fail deep inside pythonnet with `Failed to
+resolve Python.Runtime.Loader.Initialize` even though the identical build
+worked fine from a folder that was never downloaded (.NET Framework refuses
+to load an internet-zone-tagged assembly from inside pywebview's sandboxed
+AppDomain). If you still hit it on an older build, run this in PowerShell
+inside the extracted folder and try again:
+```powershell
+Get-ChildItem -Recurse | Unblock-File
+```
+
 ## Run from source / build it yourself
 
 ```bash
