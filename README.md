@@ -9,16 +9,23 @@ NOT -- it runs a fast quasi-steady-state solver in JS).
 
 ## Download and run (Windows)
 
-Grab **`SDM-Lap-Optimizer.exe`** from this repo's
-[Releases](../../releases/latest) page and double-click it. That's it -- no
-install, no Python, no browser. It opens its own window (Edge WebView2, which
-ships with Windows 10 2004+/11; older Windows gets a one-time prompt to install
-it). Everything -- your vehicle setup, edited tracks, solved laps -- is saved
+Grab **`SDM-Lap-Optimizer-win64.zip`** from this repo's
+[Releases](../../releases/latest) page, unzip it anywhere, and run
+`SDM-Lap-Optimizer.exe` inside the extracted folder. That's it -- no install,
+no Python, no browser. It opens its own window (Edge WebView2, which ships
+with Windows 10 2004+/11; older Windows gets a one-time prompt to install it).
+Everything -- your vehicle setup, edited tracks, solved laps -- is saved
 locally in that window's storage and is there next time you open it.
 
 Exports (Step 4) download to your normal Downloads folder exactly like they
 would from a browser, because the window *is* a real browser engine, not a
 sandboxed preview.
+
+It ships as a folder-in-a-zip rather than a single .exe on purpose: a
+single-file PyInstaller exe self-extracts to a temp dir at launch, and that
+exact behavior is a well-known false-positive trigger for antivirus/Windows
+Defender/browser download-protection heuristics. The unzipped-folder form
+(same app, same code) doesn't trip it.
 
 ## Run from source / build it yourself
 
@@ -27,11 +34,12 @@ git clone <this repo>
 cd sdm-lapsim-webapp
 pip install -r requirements.txt
 python app.py          # runs the app in a window, no build needed
-python build.py         # -> dist/SDM-Lap-Optimizer.exe (what Releases ships)
+python build.py         # -> dist/SDM-Lap-Optimizer-win64.zip (what Releases ships)
 ```
 
 `app.py` just points pywebview at `lapsim.html`; `build.py` runs PyInstaller
-(`--onefile --windowed`, `lapsim.html` bundled as data, `icon.ico` embedded).
+(`--onedir --windowed`, `lapsim.html` bundled as data, `icon.ico` embedded)
+and zips the result.
 The web app itself (`lapsim.html`) also still works as a plain static file if
 you'd rather open it directly in a browser or serve it from any web host --
 nothing about it depends on the desktop wrapper.
@@ -42,7 +50,7 @@ nothing about it depends on the desktop wrapper.
 |---|---|
 | `lapsim.html` | **the app** -- also the exact source published as the Claude artifact. Open directly in a browser, or run via `app.py` for the desktop version. One file, no build, no deps. |
 | `app.py` | desktop launcher -- opens `lapsim.html` in a native pywebview/WebView2 window. |
-| `build.py` | builds `dist/SDM-Lap-Optimizer.exe` via PyInstaller (onefile, windowed, icon embedded). |
+| `build.py` | builds `dist/SDM-Lap-Optimizer-win64.zip` via PyInstaller (onedir, windowed, icon embedded). |
 | `requirements.txt` | `pywebview` + `pyinstaller` -- only needed to run/build the desktop wrapper. |
 | `icon.ico` | app icon, embedded in the built exe. |
 | `maps/endurance_2026.png` | official FSAE Michigan "Endurance 2026" course map (source of the traced track) |
